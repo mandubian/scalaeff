@@ -20,4 +20,7 @@ package object effects {
     def apply[T](t : T) : T @@ U = t.asInstanceOf[T @@ U]
   }
 
+
+  // makes it easier but ugly implicit conversion too :(
+  implicit def toTag[T, U](t: T): T @@ U = t.asInstanceOf[T @@ U]
 }

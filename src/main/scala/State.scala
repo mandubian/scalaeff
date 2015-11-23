@@ -20,19 +20,8 @@ case class Put[A, B](b: B) extends State {
   def handle[M[_], X](a: A)(k: Unit => B => M[X]): M[X] = k(())(b)
 }
 
-// object State {
-//   def get[M[_], A, ES <: HList](implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, A, ES, ES] = EffM.call[M, State, ES, ES](Get[A]())
-//   def put[M[_], A, ES <: HList](a: A)(implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, Unit, ES, ES] = EffM.call[M, State, ES, ES](Put[A, A](a))
-
-//   def update[M[_], A, ES <: HList](f: A => A)(implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, Unit, ES, ES] =
-//     for {
-//       v <- get
-//       u <- put(f(v))
-//     } yield u
-
-// }
-
 case class StateEnv[M[_], ES <: HList](env: Env[M, ES]) {
+
   def get[A](implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, A, ES, ES] = EffM.call[M, State, ES, ES](Get[A]())
 
   def put[A](a: A)(implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, Unit, ES, ES] = EffM.call[M, State, ES, ES](Put[A, A](a))

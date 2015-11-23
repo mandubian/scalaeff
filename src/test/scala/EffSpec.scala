@@ -11,10 +11,6 @@ import org.scalatest.time.{Millis, Seconds, Span => TSpan}
 import cats.std.future._
 
 import shapeless._
-// import syntax.singleton._
-// import syntax.SingletonOps
-// import tag._
-// import record._
 
 
 class EffSpec extends FlatSpec with Matchers with ScalaFutures {
@@ -25,20 +21,22 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
     trait Foo
     trait Bar
 
-    val env = Env[Future, MkEff[State, Int @@ Foo] :: HNil]
+    val env = Env[Future, MkEff[State, Int @@ Foo] :: MkEff[State, Int @@ Bar] :: HNil]
     import env._
 
     val stateEnv = StateEnv(env)
 
     val eff = for {
-      _ <- stateEnv.put[Int @@ Foo](tag[Foo](5))
-      // _ <- stateEnv.update((i:Int) => i + 7)
+      _ <- stateEnv.put[Int @@ Foo](5)
+      _ <- stateEnv.put[Int @@ Bar](10)
+      _ <- stateEnv.update[Int @@ Foo](i => i + 7)
       i <- stateEnv.get[Int @@ Foo]
-    } yield (i)
+      _ <- stateEnv.update[Int @@ Bar](j => i + j + 8)
+      j <- stateEnv.get[Int @@ Bar]
+    } yield (j)
 
-    val l: Int @@ Foo = tag[Foo](0)
-
-    val r = eff.run(MkEff[State, Int @@ Foo](tag[Foo](0)) :: HNil).futureValue
+    val r = eff.run(MkEff[State, Int @@ Foo](0) :: MkEff[State, Int @@ Bar](5) :: HNil).futureValue
 
     println("Res:"+r)
+    r should equal (30)
 }

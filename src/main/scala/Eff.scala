@@ -21,35 +21,19 @@ trait Effect {
 
 /** EFFECT reification with a resource */
 trait EffectM
-case class MkEff[E <: Effect, Res](res: Res) extends EffectM {
-
-  // def -:[S <: AnyRef](s: S)(implicit w: Witness.Aux[s.type]): MkEff[E, LRes[w.T, Res]] = {
-  //   MkEff[E, LRes[w.T, Res]](LRes(w.value, res))
-  // }
-
-}
-
-// object MkEff {
-//   def apply[E <: Effect, Res <: Tagged[_]](res: Res) = new MkEff[E, Res](tag[Res](res))
-// }
+case class MkEff[E <: Effect, Res](res: Res) extends EffectM
 
 trait Env[M[_], ES0 <: HList] {
   type ES = ES0
+
   type Eff[A] = EffM[M, A, ES, ES]
 
-  def call[E <: Effect](eff: E)(implicit effElem: EffElem[E, eff.ResI, eff.ResO, ES, ES]) = EffM.call[M, E, ES, ES](eff)
-
+  // def call[E <: Effect](eff: E)(implicit effElem: EffElem[E, eff.ResI, eff.ResO, ES, ES]) = EffM.call[M, E, ES, ES](eff)
 }
 
 object Env {
   def apply[M[_], ES <: HList] = new Env[M, ES] {}
 }
-
-// object Env {
-//   def apply[M[_]] = new Env[M] {}
-// }
-
-case class LRes[Label, Res](lbl: Label, res: Res)
 
 sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList] {
   import EffM._
@@ -64,7 +48,7 @@ sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList] {
     case EMap(effP, f) => effP.eff(es)(a => eso => ce(f(a))(eso))
     case EBind(effP, f) => effP.eff(es)(a => eso => f(a).eff(eso)(ce))
     case LiftP(effP, dropE, rebuildE) => effP.eff(dropE.drop(es))(a => eso => ce(a)(rebuildE.rebuild(eso, es)))
-    case n: New[M, A, r0, e0, es] => n.effP.eff(MkEff[e0, r0](n.res) :: es)(a => eso => ce(a)(eso.asInstanceOf[ESO]))
+    case New(e, effP) => effP.eff(e :: es)(a => eso => ce(a)(eso.tail))
     case c: CallP[M, t, e, es, eso] => c.execEff(es)(a => eso => ce(a)(eso))
   }
 
@@ -72,15 +56,11 @@ sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList] {
 
   def flatMap[B, ESO2 <: HList](f: A => EffM[M, B, ESO, ESO2]): EffM[M, B, ESI, ESO2] = EBind[M, A, B, ESI, ESO, ESO2](this, f)
 
-  // def lift[Super <: HList](
-  //   implicit dropE: DropE[ESI, Super], rebuildE: RebuildE[ESO, ESI, Super]
-  // ): EffM[M, A, Super, ESO] =
-  //   LiftP[M, A, Super, ESI, ESO](this, dropE, rebuildE)
+  def lift[Super <: HList](
+    implicit dropE: DropE[ESI, Super], rebuildE: RebuildE[ESO, ESI, Super]
+  ): EffM[M, A, Super, ESO] =
+    LiftP[M, A, Super, ESI, ESO](this, dropE, rebuildE)
 
-  // def -:[S <: AnyRef](s: S)(implicit w: Witness.Aux[s.type]): EffM[M, A, Super, ESO] = {
-  //   // val w = s.witness
-  //   MkEff[E, LRes[w.T, Res]](LRes(w.value, res))
-  // }
 }
 
 
@@ -89,9 +69,9 @@ object EffM {
     type T = A
   }
 
-  case class New[M[_], A, R, E <: Effect, ES <: HList](
-    res: R, e: MkEff[E, R], effP: EffM[M, A, MkEff[E, R] :: ES, MkEff[E, R] :: ES]
-  ) extends EffM[M, A, ES, ES] {}
+  case class New[M[_], A, R, E <: Effect, ES <: HList, ESO <: HList](
+    e: MkEff[E, R], effP: EffM[M, A, MkEff[E, R] :: ES, MkEff[E, R] :: ESO]
+  ) extends EffM[M, A, ES, ESO] {}
 
   case class LiftP[M[_], A, XS <: HList, YS <: HList, YSO <: HList](
       effP: EffM[M, A, YS, YSO]
@@ -128,10 +108,10 @@ object EffM {
     effP: EffM[M, A, ES, ESO], f: A => B
   ) extends EffM[M, B, ES, ESO]
 
-  case class Labelled[Label, M[_], A, E <: Effect, Res, ESI <: HList, ESO <: HList](
-    lbl: Label,
-    effP: EffM[M, A, MkEff[E, Res] :: ESI, ESO]
-  ) extends EffM[M, A, MkEff[E, LRes[Label, Res]] :: ESI, ESO]
+  // case class Labelled[Label, M[_], A, E <: Effect, Res, ESI <: HList, ESO <: HList](
+  //   lbl: Label,
+  //   effP: EffM[M, A, MkEff[E, Res] :: ESI, ESO]
+  // ) extends EffM[M, A, MkEff[E, LRes[Label, Res]] :: ESI, ESO]
 
   def pure[M[_], ES <: HList, A](a: A): EffM[M, A, ES, ES] = Value(a)
 
@@ -141,12 +121,8 @@ object EffM {
     val prf = effElem.asInstanceOf[EffElem[E, eff.ResI, eff.ResO, ES, ESO]] // WHY IS IT NEEDED SCALAC????
   }
 
-
 }
 
-case class Eff[M[_], ES <: HList]() {
-  def call[E <: Effect](eff: E)(implicit effElem: EffElem[E, eff.ResI, eff.ResO, ES, ES]) = EffM.call[M, E, ES, ES](eff)
-}
 
 case class EffElem[E <: Effect, Res, ResO, ES <: HList, ESO <: HList](
   sel: Selector[ES, MkEff[E, Res]],
