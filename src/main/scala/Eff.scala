@@ -1,10 +1,14 @@
-package eff
+package effects
 
 import shapeless._
+import syntax.singleton._
+import record._
 import ops.hlist._
+import syntax.SingletonOps
 
 import cats.Applicative
 import scala.language.higherKinds
+import scala.language.experimental.macros
 
 /** Effect Algebraic base */
 trait Effect {
@@ -12,57 +16,71 @@ trait Effect {
   type ResI
   type ResO
 
-  // def handle[A, M[_]](res: ResI)(k: T => ResO => M[A]): M[A]
-}
-
-object Effect {
-  type Aux[T0, ResI0, ResO0] = Effect { type T = T0; type ResI = ResI0; type ResO = ResO0 }
+  def handle[M[_], A](res: ResI)(k: T => ResO => M[A]): M[A]
 }
 
 /** EFFECT reification with a resource */
-sealed trait MatEffect
-case class MkEff[Res, E <: Effect](res: Res) extends MatEffect
+trait EffectM
+case class MkEff[E <: Effect, Res](res: Res) extends EffectM {
 
+  // def -:[S <: AnyRef](s: S)(implicit w: Witness.Aux[s.type]): MkEff[E, LRes[w.T, Res]] = {
+  //   MkEff[E, LRes[w.T, Res]](LRes(w.value, res))
+  // }
 
-sealed trait Env[M[_], ES <: HList]
-case class EnvNil[M[_]]() extends Env[M, HNil]
-case class EnvCons[M[_], E <: Effect, Res, ES <: HList](head: EffEnv[M, E, Res], tail: Env[M, ES]) extends Env[M, MkEff[Res, E] :: ES]
-
-case class EffEnv[M[_], E <: Effect, Res](
-    res: Res
-  , handler: Handler[E, M]
-) {
-  type EFF = MkEff[Res, E]
-
-  def mkEff = MkEff[Res, E](res)
 }
 
+// object MkEff {
+//   def apply[E <: Effect, Res <: Tagged[_]](res: Res) = new MkEff[E, Res](tag[Res](res))
+// }
+
+trait Env[M[_], ES0 <: HList] {
+  type ES = ES0
+  type Eff[A] = EffM[M, A, ES, ES]
+
+  def call[E <: Effect](eff: E)(implicit effElem: EffElem[E, eff.ResI, eff.ResO, ES, ES]) = EffM.call[M, E, ES, ES](eff)
+
+}
+
+object Env {
+  def apply[M[_], ES <: HList] = new Env[M, ES] {}
+}
+
+// object Env {
+//   def apply[M[_]] = new Env[M] {}
+// }
+
+case class LRes[Label, Res](lbl: Label, res: Res)
 
 sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList] {
   import EffM._
 
-  def run(env: Env[M, ESI])(implicit ap: Applicative[M]): M[A] = eff(env)(a => eso => ap.pure(a))
+  def run(es: ESI)(implicit ap: Applicative[M]): M[A] = eff(es)(a => eso => ap.pure(a))
   
-  def runPureEnv(env: Env[M, ESI])(implicit ev: M[A] =:= A, ap: Applicative[M]): M[(Env[M, ESO], A)] =
-      eff(env)( a => env => ap.pure((env, a)) )
+  def runPure(es: ESI)(implicit ev: M[A] =:= A, ap: Applicative[M]): M[(ESO, A)] =
+      eff(es)( a => env => ap.pure((env, a)) )
 
-  def eff[B](env: Env[M, ESI])(ce: A => Env[M, ESO] => M[B]): M[B] = this match {
-    case Value(a) => ce(a)(env.asInstanceOf[Env[M, ESO]])
-    case EMap(effP, f) => effP.eff(env)(a => envo => ce(f(a))(envo))
-    case EBind(effP, f) => effP.eff(env)(a => envo => f(a).eff(envo)(ce))
-    case LiftP(effP, dropE, rebuildE) => effP.eff(dropE.drop(env))(a => envo => ce(a)(rebuildE.rebuild(envo, env)))
-    case n: New[M, A, r0, e0, es] => n.effP.eff(EnvCons(n.effEnv, env))(a => envo => ce(a)(envo.asInstanceOf[Env[M, ESO]]))
-    case c: CallP[M, t, e, es, eso] => c.execEff(env)(a => envo => ce(a)(envo))
+  def eff[B](es: ESI)(ce: A => ESO => M[B]): M[B] = this match {
+    case Value(a) => ce(a)(es.asInstanceOf[ESO])
+    case EMap(effP, f) => effP.eff(es)(a => eso => ce(f(a))(eso))
+    case EBind(effP, f) => effP.eff(es)(a => eso => f(a).eff(eso)(ce))
+    case LiftP(effP, dropE, rebuildE) => effP.eff(dropE.drop(es))(a => eso => ce(a)(rebuildE.rebuild(eso, es)))
+    case n: New[M, A, r0, e0, es] => n.effP.eff(MkEff[e0, r0](n.res) :: es)(a => eso => ce(a)(eso.asInstanceOf[ESO]))
+    case c: CallP[M, t, e, es, eso] => c.execEff(es)(a => eso => ce(a)(eso))
   }
 
-  def map[B, ESO2 <: HList](f: A => B) = EMap(this, f)
+  def map[B, ESO2 <: HList](f: A => B): EffM[M, B, ESI, ESO] = EMap[M, A, B, ESI, ESO](this, f)
 
-  def flatMap[B, ESO2 <: HList](f: A => EffM[M, B, ESO, ESO2]) = EBind(this, f)
+  def flatMap[B, ESO2 <: HList](f: A => EffM[M, B, ESO, ESO2]): EffM[M, B, ESI, ESO2] = EBind[M, A, B, ESI, ESO, ESO2](this, f)
 
-  def lift[Super <: HList](
-    implicit dropE: DropEnv[M, ESI, Super], rebuildE: RebuildEnv[M, ESO, ESI, Super]
-  ): EffM[M, A, Super, ESO] =
-    LiftP[M, A, Super, ESI, ESO](this, dropE, rebuildE)
+  // def lift[Super <: HList](
+  //   implicit dropE: DropE[ESI, Super], rebuildE: RebuildE[ESO, ESI, Super]
+  // ): EffM[M, A, Super, ESO] =
+  //   LiftP[M, A, Super, ESI, ESO](this, dropE, rebuildE)
+
+  // def -:[S <: AnyRef](s: S)(implicit w: Witness.Aux[s.type]): EffM[M, A, Super, ESO] = {
+  //   // val w = s.witness
+  //   MkEff[E, LRes[w.T, Res]](LRes(w.value, res))
+  // }
 }
 
 
@@ -72,13 +90,13 @@ object EffM {
   }
 
   case class New[M[_], A, R, E <: Effect, ES <: HList](
-    effEnv: EffEnv[M, E, R], e: MkEff[R, E], effP: EffM[M, A, MkEff[R, E] :: ES, MkEff[R, E] :: ES]
+    res: R, e: MkEff[E, R], effP: EffM[M, A, MkEff[E, R] :: ES, MkEff[E, R] :: ES]
   ) extends EffM[M, A, ES, ES] {}
 
   case class LiftP[M[_], A, XS <: HList, YS <: HList, YSO <: HList](
       effP: EffM[M, A, YS, YSO]
-    , dropE: DropEnv[M, YS, XS]
-    , rebuildE: RebuildEnv[M, YSO, YS, XS]
+    , dropE: DropE[YS, XS]
+    , rebuildE: RebuildE[YSO, YS, XS]
   ) extends EffM[M, A, XS, YSO] {
     type _Sub = YS
   }
@@ -87,14 +105,13 @@ object EffM {
     val eff: E
   ) extends EffM[M, T, ES, ESO] {
 
-    val prf: EnvSelector[M, ES, E, eff.ResI]
-    val updater: EnvUpdater[M, E, ES, ESO, eff.ResI, eff.ResO]
+    val prf: EffElem[E, eff.ResI, eff.ResO, ES, ESO]
 
-    def execEff[B](es: Env[M, ES])(ce: T => Env[M, ESO] => M[B]): M[B] = {
-      val effEnv: EffEnv[M, E, eff.ResI] = prf(es)
-      val res: eff.ResI = effEnv.res
-      effEnv.handler.handle(eff)(res) { (a:eff.T) => (resO: eff.ResO) =>
-        val eso = updater.apply(es, _ => resO)
+    def execEff[B](es: ES)(ce: T => ESO => M[B]): M[B] = {
+      val m: MkEff[E, eff.ResI] = prf.sel(es)
+      val res: eff.ResI = m.res
+      eff.handle(res) { (a:eff.T) => (resO: eff.ResO) =>
+        val eso = prf.rep.apply(es, MkEff[E, eff.ResO](resO))
         ce(a.asInstanceOf[T])(eso)
       }
     }
@@ -111,30 +128,41 @@ object EffM {
     effP: EffM[M, A, ES, ESO], f: A => B
   ) extends EffM[M, B, ES, ESO]
 
-  def pure[M[_], ES <: HList, A](a: A) = Value(a)
+  case class Labelled[Label, M[_], A, E <: Effect, Res, ESI <: HList, ESO <: HList](
+    lbl: Label,
+    effP: EffM[M, A, MkEff[E, Res] :: ESI, ESO]
+  ) extends EffM[M, A, MkEff[E, LRes[Label, Res]] :: ESI, ESO]
+
+  def pure[M[_], ES <: HList, A](a: A): EffM[M, A, ES, ES] = Value(a)
 
   def call[M[_], E <: Effect, ES <: HList, ESO <: HList](eff: E)(
-    implicit sel: EnvSelector[M, ES, E, eff.ResI], upd: EnvUpdater[M, E, ES, ESO, eff.ResI, eff.ResO]
-  ) = new CallP[M, eff.T, E, ES, ESO](eff) {
-    val prf = sel.asInstanceOf[EnvSelector[M, ES, E, eff.ResI]] // WHY IS IT NEEDED SCALAC????
-    val updater = upd.asInstanceOf[EnvUpdater[M, E, ES, ESO, eff.ResI, eff.ResO]]
+    implicit effElem: EffElem[E, eff.ResI, eff.ResO, ES, ESO] //sel: EnvSelector[M, ES, E, eff.ResI], upd: EnvUpdater[M, E, ES, ESO, eff.ResI, eff.ResO]
+  ): EffM[M, eff.T, ES, ESO] = new CallP[M, eff.T, E, ES, ESO](eff) {
+    val prf = effElem.asInstanceOf[EffElem[E, eff.ResI, eff.ResO, ES, ESO]] // WHY IS IT NEEDED SCALAC????
   }
 
+
+}
+
+case class Eff[M[_], ES <: HList]() {
+  def call[E <: Effect](eff: E)(implicit effElem: EffElem[E, eff.ResI, eff.ResO, ES, ES]) = EffM.call[M, E, ES, ES](eff)
 }
 
 case class EffElem[E <: Effect, Res, ResO, ES <: HList, ESO <: HList](
-    sel: Selector[ES, MkEff[Res, E]]
-  , rep: Rep.Aux[ES, MkEff[Res, E], MkEff[ResO, E], ESO]
-)
+  sel: Selector[ES, MkEff[E, Res]],
+  rep: Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]
+) 
 
 object EffElem {
-  implicit def mkEffElem[E <: Effect, Res, ResO, ES <: HList, ESO <: HList]
+  implicit def mkEffElem[M[_], E <: Effect, Res, ResO, ES <: HList, ESO <: HList]
     (implicit
-      sel: Selector[ES, MkEff[Res, E]],
-      rep: Rep.Aux[ES, MkEff[Res, E], MkEff[ResO, E], ESO]
-    ): EffElem[E, Res, ResO, ES, ESO] =
-      EffElem[E, Res, ResO, ES, ESO](sel, rep)
+      sel: Selector[ES, MkEff[E, Res]]
+    , upd: Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]
+    ) =
+      EffElem[E, Res, ResO, ES, ESO](sel, upd)
+
 }
+
 
 trait Rep[L <: HList, U, V] {
   type Out <: HList
@@ -150,291 +178,66 @@ object Rep {
     }
 }
 
-
-trait EnvSelector[M[_], ES <: HList, E <: Effect, Res] {
-  def apply(env: Env[M, ES]): EffEnv[M, E, Res]
+trait DropE[Small <: HList, Big <: HList] {
+  def drop(e: Big): Small
 }
 
-object EnvSelector {
-  implicit def one[M[_], E <: Effect, Res] = new EnvSelector[M, MkEff[Res, E] :: HNil, E, Res] {
-    def apply(env: Env[M, MkEff[Res, E] :: HNil]): EffEnv[M, E, Res] = env match {
-      case EnvCons(h, _) => h
-    }
+object DropE {
+  implicit object nil extends DropE[HNil, HNil] {
+    def drop(e: HNil): HNil = HNil
   }
 
-  implicit def rec[M[_], E <: Effect, Res, E2 <: Effect, Res2, ES <: HList](implicit next: EnvSelector[M, ES, E, Res]) = new EnvSelector[M, MkEff[Res2, E2] :: ES, E, Res] {
-    def apply(env: Env[M, MkEff[Res2, E2] :: ES]): EffEnv[M, E, Res] = env match {
-      case EnvCons(_, t) => next(t)
-    }
-  }
-}
-
-trait EnvUpdater[M[_], E <: Effect, ES <: HList, ESO <: HList, Res, ResO] {
-  def apply(env: Env[M, ES], f: Res => ResO): Env[M, ESO]
-}
-
-object EnvUpdater {
-
-  implicit def one[M[_], E <: Effect, Res, ResO] = new EnvUpdater[M, E, MkEff[Res, E] :: HNil, MkEff[ResO, E] :: HNil, Res, ResO] {
-    def apply(env: Env[M, MkEff[Res, E] :: HNil], f: Res => ResO): Env[M, MkEff[ResO, E] :: HNil] = env match {
-      case EnvCons(EffEnv(res, h), EnvNil()) => EnvCons(EffEnv[M, E, ResO](f(res), h), EnvNil[M]())
-    }
+  implicit def keep[H, HL1 <: HList, HL2 <: HList](implicit de: DropE[HL1, HL2]) = new DropE[H :: HL1, H :: HL2] {
+    def drop(e: H :: HL2): H :: HL1 = e.head :: de.drop(e.tail)
   }
 
-  implicit def rec[M[_], E <: Effect, Res, ResX, ResO, ES <: HList, ESO <: HList](implicit next: EnvUpdater[M, E, ES, ESO, Res, ResO]) =
-    new EnvUpdater[M, E, MkEff[ResX, E] :: ES, MkEff[ResX, E] :: ESO, Res, ResO] {
-      def apply(env: Env[M, MkEff[ResX, E] :: ES], f: Res => ResO): Env[M, MkEff[ResX, E] :: ESO] = env match {
-        case EnvCons(h, t) => EnvCons(h, next(t, f))
-      }
-    }
-}
-
-trait DropEnv[M[_], Small <: HList, Big <: HList] {
-  def drop(env: Env[M, Big]): Env[M, Small]
-}
-
-object DropEnv {
-  implicit def nil[M[_]] = new DropEnv[M, HNil, HNil] {
-    def drop(env: Env[M, HNil]): Env[M, HNil] = EnvNil()
-  }
-
-  implicit def keep[M[_], H, HL1 <: HList, HL2 <: HList](implicit de: DropEnv[M, HL1, HL2]) = new DropEnv[M, H :: HL1, H :: HL2] {
-    def drop(env: Env[M, H :: HL2]): Env[M, H :: HL1] = env match {
-      case EnvCons(h, t) => EnvCons(h, de.drop(t))
-    }
-  }
-
-  implicit def drop[M[_], HL1 <: HList, H, HL2 <: HList](implicit de: DropEnv[M, HL1, HL2]) = new DropEnv[M, HL1, H :: HL2] {
-    def drop(env: Env[M, H :: HL2]): Env[M, HL1] = env match {
-      case EnvCons(h, t) => de.drop(t)
-    }
+  implicit def drop[HL1 <: HList, H, HL2 <: HList](implicit de: DropE[HL1, HL2]) = new DropE[HL1, H :: HL2] {
+    def drop(e: H :: HL2): HL1 = de.drop(e.tail)
   }
 }
 
-trait RebuildEnv[M[_], Ref <: HList, Small <: HList, Big <: HList] {
-  def rebuild(env1: Env[M, Ref], env2: Env[M, Big]): Env[M, Ref]
+
+trait RebuildE[Ref <: HList, Small <: HList, Big <: HList] {
+  def rebuild(es1: Ref, es2: Big): Ref
 }
 
-object RebuildEnv extends RebuildEnv2 {
+object RebuildE extends RebuildE2 {
 
-  implicit def nil[M[_]] = new RebuildEnv[M, HNil, HNil, HNil] {
-    def rebuild(env1: Env[M, HNil], env2: Env[M, HNil]): Env[M, HNil] = EnvNil()
+  implicit object nil extends RebuildE[HNil, HNil, HNil] {
+    def rebuild(es1: HNil, es2: HNil): HNil = HNil
   }
 
 }
 
-trait RebuildEnv2 extends RebuildEnv3 {
+trait RebuildE2 extends RebuildE3 {
 
-  implicit def rightNil[M[_], H, XS <: HList] = new RebuildEnv[M, H :: XS, HNil, HNil] {
-    def rebuild(env1: Env[M, H :: XS], env2: Env[M, HNil]): Env[M, H :: XS] = env1
+  implicit def rightNil[H, XS <: HList] = new RebuildE[H :: XS, HNil, HNil] {
+    def rebuild(es1: H :: XS, es2: HNil): H :: XS = es1
   }
 
 }
 
-trait RebuildEnv3 extends RebuildEnv4 {
+trait RebuildE3 extends RebuildE4 {
 
-  implicit def leftNil[M[_], XH, XS <: HList] = new RebuildEnv[M, HNil, XH :: XS, XH :: XS] {
-    def rebuild(env1: Env[M, HNil], env2: Env[M, XH :: XS]): Env[M, HNil] = env1
+  implicit def leftNil[XH, XS <: HList] = new RebuildE[HNil, XH :: XS, XH :: XS] {
+    def rebuild(es1: HNil, es2: XH :: XS): HNil = es1
   }
 
-  implicit def keepLeft[M[_], XH, XS <: HList, YH, YS <: HList](implicit sub: RebuildEnv[M, YS, XS, XS]) =
-    new RebuildEnv[M, YH :: YS , XH :: XS , XH :: XS] {
-      def rebuild(env1: Env[M, YH :: YS], env2: Env[M, XH :: XS]): Env[M, YH :: YS] = (env1, env2) match {
-        case (EnvCons(h1, t1), EnvCons(h2, t2)) => EnvCons(h1, sub.rebuild(t1, t2))
-      }
+  implicit def keepLeft[XH, XS <: HList, YH, YS <: HList](implicit sub: RebuildE[YS, XS, XS]) =
+    new RebuildE[YH :: YS , XH :: XS , XH :: XS] {
+      def rebuild(es1: YH :: YS, es2: XH :: XS): YH :: YS = es1.head :: sub.rebuild(es1.tail, es2.tail)
     }
 
 }
 
-trait RebuildEnv4 {
+trait RebuildE4 {
 
-  implicit def dropRight[M[_], XH, XS <: HList, YS <: HList](implicit sub: RebuildEnv[M, YS, XS, XS]) =
-    new RebuildEnv[M, YS, XH :: XS, XH :: XS] {
-      def rebuild(env1: Env[M, YS], env2: Env[M, XH :: XS]): Env[M, YS] = env2 match {
-        case EnvCons(h, t) => sub.rebuild(env1, t)
-      }
+  implicit def dropRight[XH, XS <: HList, YS <: HList](implicit sub: RebuildE[YS, XS, XS]) =
+    new RebuildE[YS, XH :: XS, XH :: XS] {
+      def rebuild(es1: YS, es2: XH :: XS): YS = sub.rebuild(es1, es2.tail)
     }
 
 }
 
-object Test {
-  import scala.concurrent.Future
 
-  // implicitly[SubList[Int :: Double :: String :: HNil, Int :: Double :: String :: HNil]]
-  // implicitly[SubList[Int :: String :: HNil, Int :: Double :: String :: HNil]]
-  // implicitly[SubList[HNil, HNil]]
-  // implicitly[SubList[Int :: Double :: HNil, Int :: Double :: HNil]]
-  // implicitly[SubList[Int :: String :: HNil, Int :: Double :: HNil]] // Doesn't compile
-  // implicitly[SubList[Double :: Int :: HNil, Int :: Double :: HNil]] // Doesn't compile
-
-  implicitly[DropEnv[Future, Int :: Double :: String :: HNil, Int :: Double :: String :: HNil]]
-  implicitly[DropEnv[Future, Int :: String :: HNil, Int :: Double :: String :: HNil]]
-  implicitly[DropEnv[Future, HNil, HNil]]
-  implicitly[DropEnv[Future, Int :: Double :: HNil, Int :: Double :: HNil]]
-  // implicitly[DropEnv[Future, Int :: String :: HNil, Int :: Double :: HNil]] // Doesn't compile
-  // implicitly[DropEnv[Future, Double :: Int :: HNil, Int :: Double :: HNil]] // Doesn't compile
-
-  implicitly[RebuildEnv[Future, HNil, HNil,HNil]]
-  implicitly[RebuildEnv[Future, Int :: HNil, HNil,HNil]]
-  implicitly[RebuildEnv[Future, HNil, Int :: HNil, Int :: HNil]]
-  implicitly[RebuildEnv[Future, Int :: Double :: String :: HNil, Int :: Double :: String :: HNil, Int :: Double :: String :: HNil]]
-  implicitly[RebuildEnv[Future, Int :: Double :: String :: HNil, Int :: String :: HNil, Int :: String :: HNil]]
-  implicitly[RebuildEnv[Future, Int :: String :: HNil, Int :: Double :: HNil, Int :: Double :: HNil]] // should it compile
-  implicitly[RebuildEnv[Future, String :: Int :: HNil, Int :: Double :: HNil, Int :: Double :: HNil]] // should it compile
-}
-
-
-
-
-
-  // implicit def handler[M[_]]: Handler[State, M] = new Handler[State, M] {
-  //   def handle[A](eff: State)(a: eff.ResI)(k: eff.T => eff.ResO => M[A]): M[A] = //eff.handle(a)(k)
-  //     eff match {
-  //       case Get() => k(a)(a)
-  //     }
-  // }
-
-  // type STATE[A] = MkEff[A, State]
-
-  // def get[M[_], A, ES <: HList](implicit el: EffElem[State, A, A, ES, ES]) = EffM.call[M, State, ES, ES](Get[A]())
-
-  // def put[M[_], A, B, ES <: HList](b: B)(implicit el: EffElem[State, A, B, ES, ES]) = EffM.call[M, State, ES, ES](Put[A, B](b))
-
-/*
-
-trait IsEffEnvList[E <: HList]
-
-object IsEffEnvList {
-  implicit def hnil = new IsEffEnvList[HNil] {}
-
-  implicit def rec[M[_], E <: Effect, Res, HT <: HList](implicit t: IsEffEnvList[HT]) = new IsEffEnvList[EffEnv[M, E, Res] :: HT] {}
-}
-
-trait MatchEffEnvList[E <: HList, F <: HList] {
-  def apply(es: E): F
-}
-
-object MatchEffEnvList {
-  implicit def hnil = new MatchEffEnvList[HNil, HNil] {
-    def apply(es: HNil): HNil = HNil
-  }
-
-  implicit def rec[M[_], E <: Effect, Res, ET  <: HList, FT <: HList](implicit tailM: MatchEffEnvList[ET, FT]) =
-    new MatchEffEnvList[EffEnv[M, E, Res] :: ET, MkEff[Res, E] :: FT] {
-      def apply(es: EffEnv[M, E, Res] :: ET): MkEff[Res, E] :: FT = es.head.mkEff :: tailM(es.tail)
-    }
-}
-
-trait MatchEffEnvListOut[F <: HList, E <: HList] {
-  def apply(es: F): E
-}
-
-object MatchEffEnvListOut {
-  implicit def hnil = new MatchEffEnvListOut[HNil, HNil] {
-    def apply(es: HNil): HNil = HNil
-  }
-
-  implicit def rec[M[_], E <: Effect, Res, FT <: HList, ET <: HList](
-    implicit tailM: MatchEffEnvListOut[FT, ET], handler: Handler[E, M]
-  ) = new MatchEffEnvListOut[MkEff[Res, E] :: FT, EffEnv[M, E, Res] :: ET] {
-    def apply(es: MkEff[Res, E] :: FT): EffEnv[M, E, Res] :: ET = EffEnv(es.head.res, handler) :: tailM(es.tail)
-  }
-}
-*/
-  // def execEff[M[_], B, E <: Effect, ES <: HList, ESO <: HList](es: ES)(eff: E)(ce: eff.T => ESO => M[B])(
-  //   implicit  handler: Handler[E, M],
-  //             prf: EffElem[E, eff.ResI, eff.ResO, ES, ESO]
-  // ): M[B] = {
-  //   val ceff: MkEff[eff.ResI, E] = prf.sel(es)
-  //   val res: eff.ResI = ceff.res
-  //   handler.handle(eff)(res) { (a:eff.T) => (resO: eff.ResO) =>
-  //     val eso = prf.rep.apply(es, MkEff(resO))
-  //     ce(a)(eso)
-  //   }
-  // }
-
-/*
-trait SubList[Sub <: HList, Super <: HList] {
-  def apply(sup: Super): Sub
-}
-
-object SubList {
-
-  implicit def hnilSubList = new SubList[HNil, HNil] {
-    def apply(sup: HNil): HNil = HNil
-  }
-
-  implicit def keepSubList[H, Sub <: HList, Super <: HList](
-    implicit sub: SubList[Sub, Super]
-  ) = new SubList[H :: Sub, H :: Super] {
-    def apply(sup: H :: Super) = sup.head :: sub.apply(sup.tail)
-  }
-
-  implicit def dropSubList[H, Sub <: HList, Super <: HList](
-    implicit sub: SubList[Sub, Super]
-  ) = new SubList[Sub, H :: Super] {
-    def apply(sup: H :: Super): Sub = sub.apply(sup.tail)
-  }
-}
-
-*/
-
-// sealed trait SubList[XS <: HList, YS <: HList]
-// case object SubNil extends SubList[HNil, HNil]
-// case class Keep[H, XS <: HList, YS <: HList]() extends SubList[H :: XS, H :: YS]
-// case class Drop[H, XS <: HList, YS <: HList]() extends SubList[XS, H :: YS]
-
-// object SubList {
-//   implicit val hnilSubList: SubList[HNil, HNil] = SubNil
-//   implicit def keep[H, XS <: HList, YS <: HList] = Keep[H , XS, YS]()
-//   implicit def drop[H, XS <: HList, YS <: HList]: SubList[XS, H :: YS] = Drop[H , XS, YS]()
-// }
-
-// trait DropEnv2[M[_], XS <: HList, YS <: HList] {
-//   def drop(env: Env[M, YS]): Env[M, XS]
-// }
-
-// object DropEnv2 {
-//   implicit def dropEnv[M[_], XS <: HList, YS <: HList](implicit sub: SubList[XS, YS]) = new DropEnv2[M, XS, YS]{
-//     def drop(env: Env[M, YS]): Env[M, XS] = 
-//   }
-// }
-
-/*
-trait UpdateList[Upd <: HList, Sub <: HList] {
-  def update(ext: Upd, sub: Sub): Upd
-}
-
-object UpdateList {
-  implicit def first[H, Sub <: HList, Super <: HList](
-    implicit sublist: SubList[Sub, Super], upd: UpdateList[Super, Sub]
-  ) = new UpdateList[H :: Super, H :: Sub] {
-        def update(ext: H :: Super, sub: H :: Sub): H :: Super =
-          ext.head :: upd.update(ext.tail, sub.tail)
-      }
-
-  implicit def second[H, Sub <: HList, Super <: HList](
-    implicit sublist: SubList[Sub, Super], upd: UpdateList[Super, Sub]
-  ) = new UpdateList[Super, H :: Sub] {
-        def update(ext: Super, sub: H :: Sub): H :: Super =
-          sub.head :: upd.update(ext, sub.tail)
-      }
-
-  implicit def hnilUpd =
-    new UpdateList[HNil, HNil] {
-      def update(ext: HNil, sub: HNil): HNil = HNil
-    }
-
-  implicit def hnilRight[H, Sub <: HList, Super <: HList] =
-    new UpdateList[H :: Super, HNil] {
-      def update(ext: H :: Super, sub: HNil): H :: Super = ext
-    }
-
-  implicit def hnilLeft[H, Sub <: HList, Super <: HList] =
-    new UpdateList[HNil, H :: Super] {
-      def update(ext: HNil, sub: H :: Super): HNil = ext
-    }
-
-}
-*/
 

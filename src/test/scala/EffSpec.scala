@@ -1,4 +1,4 @@
-package eff
+package effects
 
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -8,7 +8,13 @@ import org.scalatest.{Assertions, BeforeAndAfterAll, FeatureSpec, FlatSpec, Matc
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.time.{Millis, Seconds, Span => TSpan}
 
+import cats.std.future._
+
 import shapeless._
+// import syntax.singleton._
+// import syntax.SingletonOps
+// import tag._
+// import record._
 
 
 class EffSpec extends FlatSpec with Matchers with ScalaFutures {
@@ -16,18 +22,23 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
   implicit val defaultPatience =
     PatienceConfig(timeout =  TSpan(300, Seconds), interval = TSpan(5, Millis))
 
-  "Eff" should "have handlers" in {
+    trait Foo
+    trait Bar
 
-    implicitly[Handler[Get[Int], Future]]
-    implicitly[Handler[Put[Int, String], Future]]
+    val env = Env[Future, MkEff[State, Int @@ Foo] :: HNil]
+    import env._
 
-    implicitly[CopHandlers[Future, Get[Int], Put[Int, String] :+: CNil]]
-    // val g = Generic[State[_, _, _]]
+    val stateEnv = StateEnv(env)
 
-    // val i: Int :: HNil = g.to(Put[Int, Int](5))
-    // implicitly[Handler[State[_, _, _], Future]]
+    val eff = for {
+      _ <- stateEnv.put[Int @@ Foo](tag[Foo](5))
+      // _ <- stateEnv.update((i:Int) => i + 7)
+      i <- stateEnv.get[Int @@ Foo]
+    } yield (i)
 
-    1 should equal(1)
-  }
+    val l: Int @@ Foo = tag[Foo](0)
 
+    val r = eff.run(MkEff[State, Int @@ Foo](tag[Foo](0)) :: HNil).futureValue
+
+    println("Res:"+r)
 }

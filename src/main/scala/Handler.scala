@@ -1,7 +1,7 @@
 package eff
 
 import shapeless._
-
+/*
 trait Handler[E <: Effect, M[_]] {
   def handle[A](eff: E)(res: eff.ResI)(k: eff.T => eff.ResO => M[A]): M[A]
 }
@@ -50,6 +50,7 @@ object CopHandlers {
 
     }
 }
+*/
 
 // trait EffectX[E <: Effect, T, ResI, ResO]
 
