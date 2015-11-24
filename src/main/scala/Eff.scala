@@ -68,7 +68,7 @@ object EffM {
   case class Value[M[_], ES <: HList, A](a: A) extends EffM[M, A, ES, ES] {
     type T = A
   }
-
+ 
   case class New[M[_], A, R, E <: Effect, ES <: HList, ESO <: HList](
     e: MkEff[E, R], effP: EffM[M, A, MkEff[E, R] :: ES, MkEff[E, R] :: ESO]
   ) extends EffM[M, A, ES, ESO] {}
@@ -120,6 +120,11 @@ object EffM {
   ): EffM[M, eff.T, ES, ESO] = new CallP[M, eff.T, E, ES, ESO](eff) {
     val prf = effElem.asInstanceOf[EffElem[E, eff.ResI, eff.ResO, ES, ESO]] // WHY IS IT NEEDED SCALAC????
   }
+
+  def lift[M[_], A, E <: Effect, ES <: HList, ESO <: HList, Super <: HList](eff: EffM[M, A, ES, ESO])(
+    implicit dropE: DropE[ES, Super], rebuildE: RebuildE[ESO, ES, Super]
+  ): EffM[M, A, Super, ESO] =
+    LiftP[M, A, Super, ES, ESO](eff, dropE, rebuildE)
 
 }
 

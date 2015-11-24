@@ -1,9 +1,10 @@
 package effects
 
-import shapeless.HList
+import shapeless.{HList, ::, HNil}
 
 
 sealed trait State extends Effect
+
 case class Get[A]() extends State {
   type T = A
   type ResI = A
@@ -20,67 +21,64 @@ case class Put[A, B](b: B) extends State {
   def handle[M[_], X](a: A)(k: Unit => B => M[X]): M[X] = k(())(b)
 }
 
-case class StateEnv[M[_], ES <: HList](env: Env[M, ES]) {
 
-  def get[A](implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, A, ES, ES] = EffM.call[M, State, ES, ES](Get[A]())
+object State {
 
-  def put[A](a: A)(implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, Unit, ES, ES] = EffM.call[M, State, ES, ES](Put[A, A](a))
+  type MkState[R] = MkEff[State, R]
 
-  def update[A](f: A => A)(implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, Unit, ES, ES] =
+  def get[M[_], A, ES <: HList](implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, A, ES, ES] = EffM.call[M, State, ES, ES](Get[A]())
+
+  def put[M[_], A, ES <: HList](a: A)(implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, Unit, ES, ES] = EffM.call[M, State, ES, ES](Put[A, A](a))
+
+  def update[M[_], A, ES <: HList](f: A => A)(implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, Unit, ES, ES] =
     for {
       v <- get
       u <- put(f(v))
     } yield u
+
+  def putM[M[_], A, B, ES <: HList, ESO <: HList](b: B)(implicit prf: EffElem[State, A, B, ES, ESO]): EffM[M, Unit, ES, ESO] =
+    EffM.call[M, State, ES, ESO](Put[A, B](b))
+
+
+  def updateM[M[_], A, B, ES <: HList, ESO <: HList](f: A => B)(implicit prf: EffElem[State, A, A, ES, ES], prf2: EffElem[State, A, B, ES, ESO]): EffM[M, Unit, ES, ESO] =
+    for {
+      v <- get[M, A, ES]
+      u <- putM[M, A, B, ES, ESO](f(v))
+    } yield u
 }
 
-/*
-object State {
+case class StateEnv[M[_], ES0 <: HList](env: Env[M, ES0]) {
+  type ES = ES0
 
-  implicit def handlerGet[M[_], A] = new Handler[Get[A], M] {
-    def handle[X](eff: Get[A])(a: A)(k: A => A => M[X]): M[X] = k(a)(a)
-  }
+  def get[A](implicit prf: EffElem[State, A, A, ES, ES]) = State.get[M, A, ES]
+  def getM[A, ES1 <: HList](implicit prf: EffElem[State, A, A, ES1, ES1]) = State.get[M, A, ES1]
 
-  implicit def handlerPut[M[_], A, B] = new Handler[Put[A, B], M] {
-    def handle[X](eff: Put[A, B])(a: A)(k: Unit => B => M[X]): M[X] = k(())(eff.b)
-  }
+  def put[A](a: A)(implicit prf: EffElem[State, A, A, ES, ES]) = State.put[M, A, ES](a)
 
-}
+  def update[A](f: A => A)(implicit prf: EffElem[State, A, A, ES, ES]) = State.update[M, A, ES](f)
 
-import shapeless._
+  def putM[A, B, ESO <: HList](b: B)(implicit prf: EffElem[State, A, B, ES, ESO]) =
+    State.putM[M, A, B, ES, ESO](b)
 
-
-class StateGen() {
-  // type a
-  // type b
-  type T[A]       = A       :+: Unit      :+: CNil
-  type ResI[A]    = A       :+: A         :+: CNil
-  type ResO[A, B] = A       :+: B         :+: CNil
-  type S[A, B]    = Get[A]  :+: Put[A, B] :+: CNil
-
-  implicit def hget[M[_], A] = implicitly[Handler[Get[A], M]]
-  implicit def hput[M[_], A, B] = implicitly[Handler[Put[A, B], M]]
-
-  def handle[M[_], X, A, B](eff: S[A, B])(resI: ResI[A])(k: T[A] => ResO[A, B] => M[X]): M[X] = eff match {
-    case Inl(get) => hget[M, A].handle(get)(resI.head.get)(t => reso => k(Coproduct[T[A]](t))(Coproduct[ResO[A, B]](reso)))
-    case Inr(Inl(put)) => hput[M, A, B].handle(put)(resI.tail.get.head.get)(t => reso => k(Coproduct[T[A]](t))(Coproduct[ResO[A, B]](reso)))
-  }
-
-  def lift[A, B](s: State): S[A, B] = s match {
-    case g@Get() => Coproduct[S[A, B]](Get[A]())
-    case p@Put(b) => Coproduct[S[A, B]](Put[A, B](b.asInstanceOf[B]))
-  }
-}
-
-object StateGen {
-
-  implicit def handlerState[M[_]] = new Handler[State, M] {
-    def handle[X](eff: State)(res: eff.ResI)(k: eff.T => eff.ResO => M[X]): M[X] = {
-      val st = new StateGen()
-      st.handle(st.lift[eff.ResI, eff.ResO](eff))(Coproduct[st.ResI[eff.ResI]](res)) { st.T[eff.ResI] => st.ResO[eff.ResI,eff.ResO] =>
-
-      }
-    }
-  }
+  def updateM[A, B, ESO <: HList](f: A => B)(implicit prf: EffElem[State, A, A, ES, ES], prf2: EffElem[State, A, B, ES, ESO]) =
+    State.updateM[M, A, B, ES, ESO](f)
 
 }
-*/
+
+case class StateEnv0[M[_]]() {
+
+  def get[A, ES <: HList](implicit prf: EffElem[State, A, A, ES, ES]) = State.get[M, A, ES]
+
+  def put[A, ES <: HList](a: A)(implicit prf: EffElem[State, A, A, ES, ES]) = State.put[M, A, ES](a)
+
+  def update[A, ES <: HList](f: A => A)(implicit prf: EffElem[State, A, A, ES, ES]) =
+    State.update[M, A, ES](f)
+
+  def putM[A, B, ES <: HList, ESO <: HList](b: B)(implicit prf: EffElem[State, A, B, ES, ESO]) =
+    State.putM[M, A, B, ES, ESO](b)
+
+
+  def updateM[A, B, ES <: HList, ESO <: HList](f: A => B)(implicit prf: EffElem[State, A, A, ES, ES], prf2: EffElem[State, A, B, ES, ESO]) =
+    State.updateM[M, A, B, ES, ESO](f)
+
+}
