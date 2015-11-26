@@ -9,6 +9,7 @@ import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.time.{Millis, Seconds, Span => TSpan}
 
 import cats.std.future._
+import cats.data.Xor
 
 import shapeless._
 
@@ -22,7 +23,7 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
   trait Bar
 
 
-  "State" should "StateEnv" in {
+  /*"State" should "StateEnv" in {
     val env = Env[Future, MkEff[State, Int @@ Foo] :: MkEff[State, Int @@ Bar] :: HNil]
     import env._
 
@@ -49,7 +50,7 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
     type ES = MkEff[State, Int @@ Foo] :: MkEff[State, Int @@ Bar] :: HNil
     type ES2 = MkEff[State, String] :: MkEff[State, Int @@ Bar] :: HNil
 
-    val stateEnv = StateEnv0[Future]()
+    for val stateEnv = StateEnv0[Future]()
 
     val eff = for {
       _ <- stateEnv.put[Int @@ Foo, ES](5)
@@ -66,6 +67,34 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 
     println("Res:"+r)
     r should equal ("toto_30")
-  }
+  }*/
 
+  it should "FileIO" in {
+    type ES = (FileIO<>Unit) :: (StdIO<>Unit) :: HNil
+    type ES2 = (FileIO<>(Xor[ErrorFile, OpenFile[Read.type]])) :: (StdIO<>Unit) :: HNil
+
+    val eff = for {
+      b <-  FileIO.open[Future, Read.type, ES, ES2]("toto.txt")
+      _ <-  b match {
+              case true   => 
+                for {
+                  l <-  FileIO.readLine[Future, ES2]
+                  _ <-  l match {
+                          case Some(l) => StdIO.putStrLn[Future, ES2](l)
+                          case None => StdIO.putStrLn[Future, ES2]("")
+                        }
+                  _ <-  FileIO.close[Future, Read.type, ES2, ES]
+                } yield ()
+                
+              case false  => for {
+                _ <- StdIO.putStrLn[Future, ES2]("Can't open file")
+                _ <- FileIO.close[Future, Read.type, ES2, ES]
+              } yield ()
+            }
+    } yield ()
+
+    val r = eff.run(MkEff[FileIO, Unit](()) :: MkEff[StdIO, Unit](()) :: HNil).futureValue
+
+    println("Res:"+r)
+  }
 }

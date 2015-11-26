@@ -24,7 +24,7 @@ case class Put[A, B](b: B) extends State {
 
 object State {
 
-  type MkState[R] = MkEff[State, R]
+  // type MkState[R] = <>[State, R]
 
   def get[M[_], A, ES <: HList](implicit prf: EffElem[State, A, A, ES, ES]): EffM[M, A, ES, ES] = EffM.call[M, State, ES, ES](Get[A]())
 

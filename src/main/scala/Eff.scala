@@ -91,7 +91,7 @@ object EffM {
       val m: MkEff[E, eff.ResI] = prf.sel(es)
       val res: eff.ResI = m.res
       eff.handle(res) { (a:eff.T) => (resO: eff.ResO) =>
-        val eso = prf.rep.apply(es, MkEff[E, eff.ResO](resO))
+        val eso = prf.rep(es, MkEff[E, eff.ResO](resO))
         ce(a.asInstanceOf[T])(eso)
       }
     }
@@ -129,18 +129,80 @@ object EffM {
 }
 
 
-case class EffElem[E <: Effect, Res, ResO, ES <: HList, ESO <: HList](
+trait EffElem[E <: Effect, Res, ResO, ES <: HList, ESO <: HList] {
+/*(
   sel: Selector[ES, MkEff[E, Res]],
   rep: Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]
-) 
+)*/  
+  def sel(es: ES): MkEff[E, Res]
+  def rep(es: ES, r: MkEff[E, ResO]): ESO
+}
 
 object EffElem {
+
   implicit def mkEffElem[M[_], E <: Effect, Res, ResO, ES <: HList, ESO <: HList]
     (implicit
-      sel: Selector[ES, MkEff[E, Res]]
-    , upd: Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]
+      sel0: Selector[ES, MkEff[E, Res]]
+    , upd0: Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]
     ) =
-      EffElem[E, Res, ResO, ES, ESO](sel, upd)
+    new EffElem[E, Res, ResO, ES, ESO] {
+      //(sel, upd)
+      def sel(es: ES): MkEff[E, Res] = sel0(es)
+      def rep(es: ES, r: MkEff[E, ResO]): ESO = upd0(es, r)
+    }
+
+  /*implicit def mkCop[M[_], E <: Effect, Res, H, C <: Coproduct, ES <: HList, ESO <: HList]
+    (implicit
+      sel0: Selector[ES, MkEff[E, Res]]
+    , eh: EffElem[E, Res, H, ES, ESO]
+    , er: EffElem[E, Res, C, ES, ESO]
+    ) =
+    new EffElem[E, Res, H :+: C, ES, ESO] {
+      def sel(es: ES): MkEff[E, Res] = sel0(es)
+      def rep(es: ES, r: MkEff[E, H :+: C]): ESO = r.res match {
+        case Inl(h) => eh.rep(es, MkEff[E, H](h))
+        case Inr(r) => er.rep(es, MkEff[E, C](r))
+      }
+    }*/
+}
+
+trait EffElem0 {
+
+  // implicit def mkCop[M[_], E <: Effect, Res, C <: Coproduct, ES <: HList, ESO <: HList]
+  //   (implicit
+  //     eh: EffElem[E, Res :+: C, Res :+: C, ES, ESO]
+  //   ) =
+  //   new EffElem[E, Res, ResO, ES, ESO] {
+  //     def sel(es: ES): MkEff[E, Res] = eh.sel(es)
+  //     def rep(es: ES, r: MkEff[E, H :+: C]): ESO = r.res match {
+  //       case Inl(h) => eh.rep(es, MkEff[E, H](h))
+  //       case Inr(r) => er.rep(es, MkEff[E, C](r))
+  //     }
+  //   }
+
+  // implicit def mkCop2[M[_], E <: Effect, Res, H, C <: Coproduct, ES <: HList, ESO <: HList]
+  //   (implicit
+  //     sel0: Selector[ES, MkEff[E, Res]]
+  //   , eh: EffElem[E, Res, C, ES, ESO]
+  //   ) =
+  //   new EffElem[E, Res, H, ES, ESO] {
+  //     def sel(es: ES): MkEff[E, Res] = sel0(es)
+  //     def rep(es: ES, r: MkEff[E, H :+: C]): ESO = r.res match {
+  //       case Inl(h) => eh.rep(es, MkEff[E, H](h))
+  //       case Inr(r) => er.rep(es, MkEff[E, C](r))
+  //     }
+  //   }
+
+  // implicit def MkEffElem[M[_], E <: Effect, Res, ResO, ES <: HList, ESO <: HList]
+  //   (implicit
+  //     sel0: Selector[ES, MkEff[E, Res]]
+  //   , upd0: Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]
+  //   ) =
+  //   new EffElem[E, Res, ResO, ES, ESO] {
+  //     //(sel, upd)
+  //     def sel(es: ES): MkEff[E, Res] = sel0(es)
+  //     def rep(es: ES, r: MkEff[E, ResO]): ESO = upd0(es, r)
+  //   }
 
 }
 
