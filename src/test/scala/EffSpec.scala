@@ -13,17 +13,23 @@ import cats.data.Xor
 
 import shapeless._
 
+import file._
+import state._
+import stdio._
 
 class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 
   implicit val defaultPatience =
     PatienceConfig(timeout =  TSpan(300, Seconds), interval = TSpan(5, Millis))
 
-  trait Foo
-  trait Bar
+  trait Label
+  case object Foo extends Label
+  type Foo = Foo.type
+  case object Bar extends Label
+  type Bar = Bar.type
 
 
-  /*"State" should "StateEnv" in {
+  "State" should "StateEnv" in {
     val env = Env[Future, MkEff[State, Int @@ Foo] :: MkEff[State, Int @@ Bar] :: HNil]
     import env._
 
@@ -50,7 +56,7 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
     type ES = MkEff[State, Int @@ Foo] :: MkEff[State, Int @@ Bar] :: HNil
     type ES2 = MkEff[State, String] :: MkEff[State, Int @@ Bar] :: HNil
 
-    for val stateEnv = StateEnv0[Future]()
+    val stateEnv = StateEnv0[Future]()
 
     val eff = for {
       _ <- stateEnv.put[Int @@ Foo, ES](5)
@@ -67,11 +73,11 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 
     println("Res:"+r)
     r should equal ("toto_30")
-  }*/
-
+  }
+  
   it should "FileIO" in {
     type ES = (FileIO<>Unit) :: (StdIO<>Unit) :: HNil
-    type ES2 = (FileIO<>(Xor[ErrorFile, OpenFile[Read.type]])) :: (StdIO<>Unit) :: HNil
+    type ES2 = (FileIO<>FileStatus[Read.type]) :: (StdIO<>Unit) :: HNil
 
     val eff = for {
       b <-  FileIO.open[Future, Read.type, ES, ES2]("toto.txt")
@@ -97,4 +103,96 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 
     println("Res:"+r)
   }
+
+  it should "FileIO with labels" in {
+    type ES = (FileIO@@Foo<>Unit) :: (StdIO<>Unit) :: HNil
+    type ES2 = (FileIO@@Foo<>FileStatus[Read.type]) :: (StdIO<>Unit) :: HNil
+
+    val eff = for {
+      b <-  FileIO[Foo].open[Future, Read.type, ES, ES2]("toto.txt")
+      _ <-  b match {
+              case true   => 
+                for {
+                  l <-  FileIO[Foo].readLine[Future, ES2]
+                  _ <-  l match {
+                          case Some(l) => StdIO.putStrLn[Future, ES2](l)
+                          case None => StdIO.putStrLn[Future, ES2]("")
+                        }
+                  _ <-  FileIO[Foo].close[Future, Read.type, ES2, ES]
+                } yield ()
+                
+              case false  => for {
+                _ <- StdIO.putStrLn[Future, ES2]("Can't open file")
+                _ <- FileIO[Foo].close[Future, Read.type, ES2, ES]
+              } yield ()
+            }
+    } yield ()
+
+    val r = eff.run(MkEff[FileIO@@Foo, Unit](()) :: MkEff[StdIO, Unit](()) :: HNil).futureValue
+
+    println("Res:"+r)
+  }
+
+  it should "FileIO read + write" in {
+    type ES =   (FileIO@@Foo<>Unit) ::
+                (FileIO@@Bar<>Unit) ::
+                (StdIO<>Unit) ::
+                (State<>Int) ::
+                HNil
+
+    type ES2 =  (FileIO@@Foo<>FileStatus[Read.type]) ::
+                (FileIO@@Bar<>Unit) ::
+                (StdIO<>Unit) ::
+                (State<>Int) ::
+                HNil
+
+
+    type ES3 =  (FileIO@@Foo<>FileStatus[Read.type]) ::
+                (FileIO@@Bar<>FileStatus[Write.type]) ::
+                (StdIO<>Unit) ::
+                (State<>Int) ::
+                HNil
+
+    val eff = for {
+      r <-  FileIO[Foo].open[Future, Read.type, ES, ES2]("toto.txt")
+      w <-  FileIO[Bar].open[Future, Write.type, ES2, ES3]("tata.txt")
+      _ <-  if(r && w) {
+                def rw: EffM[Future, Unit, ES3, ES3] = for {
+                  isEof <- FileIO[Foo].isEof[Future, ES3]
+                  _ <-  if(!isEof) 
+                          for {
+                            s <-  FileIO[Foo].readLine[Future, ES3]
+                            _ <-  s match {
+                                    case Some(s) => for {
+                                      _ <- FileIO[Bar].writeLine[Future, ES3](s)
+                                      _ <- StdIO.putStrLn[Future, ES3](s"Read/Write $s")
+                                      _ <- State.update[Future, Int, ES3](_ + 1)
+                                    } yield ()
+                                    case None => EffM.pure[Future, ES3, Unit](())
+                                  }
+                            _ <-  rw
+                          } yield ()
+                        else EffM.pure[Future, ES3, Unit](())
+                } yield (())
+
+                rw
+            } else StdIO.putStrLn[Future, ES3](s"Couldn't open one of files $r $w")
+
+      _ <-  FileIO[Bar].close[Future, Write.type, ES3, ES2]
+      _ <-  FileIO[Foo].close[Future, Read.type, ES2, ES]
+      i <-  State.get[Future, Int, ES]
+    } yield (i)
+
+    val r = eff.run(
+      MkEff[FileIO@@Foo, Unit]() ::
+      MkEff[FileIO@@Bar, Unit]() ::
+      MkEff[StdIO, Unit]() ::
+      MkEff[State, Int](0) ::
+      HNil
+    ).futureValue
+
+    println(s"Read/Write $r lines")
+  }
+
+  
 }

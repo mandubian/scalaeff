@@ -1,4 +1,5 @@
 package effects
+package stdio
 
 import shapeless._
 

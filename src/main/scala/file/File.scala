@@ -1,4 +1,5 @@
 package effects
+package file
 
 import java.io.{File, BufferedReader, FileReader, FileWriter}
 
@@ -36,7 +37,7 @@ sealed trait FileIO extends Effect
 case class Open[Mo <: Mode](fname: String)(implicit moder: Moder[Mo]) extends FileIO {
   type T = Boolean
   type ResI = Unit
-  type ResO = Xor[ErrorFile, OpenFile[Mo]]
+  type ResO = FileStatus[Mo]
 
   def handle[M[_], X](res: Unit)(k: Boolean => Xor[ErrorFile, OpenFile[Mo]] => M[X]): M[X] = {
     val fp = new File(fname)
@@ -57,10 +58,10 @@ case class Open[Mo <: Mode](fname: String)(implicit moder: Moder[Mo]) extends Fi
 
 case class Close[Mo <: Mode](implicit moder: Moder[Mo]) extends FileIO {
   type T = Unit
-  type ResI = Xor[ErrorFile, OpenFile[Mo]]
+  type ResI = FileStatus[Mo]
   type ResO = Unit 
 
-  def handle[M[_], X](res: Xor[ErrorFile, OpenFile[Mo]])(k: Unit => Unit => M[X]): M[X] = res match {
+  def handle[M[_], X](res: FileStatus[Mo])(k: Unit => Unit => M[X]): M[X] = res match {
     case Xor.Left(e) => k()()
     case Xor.Right(o) => moder.mode match {
       case Read => k(moder.cast[FileRead](o).reader.close)()
@@ -71,10 +72,10 @@ case class Close[Mo <: Mode](implicit moder: Moder[Mo]) extends FileIO {
 
 case object ReadLine extends FileIO {
   type T = Option[String]
-  type ResI = Xor[ErrorFile, OpenFile[Read.type]]
-  type ResO = Xor[ErrorFile, OpenFile[Read.type]]
+  type ResI = FileStatus[Read.type]
+  type ResO = FileStatus[Read.type]
 
-  def handle[M[_], X](res: Xor[ErrorFile, OpenFile[Read.type]])(k: Option[String] => Xor[ErrorFile, OpenFile[Read.type]] => M[X]): M[X] = 
+  def handle[M[_], X](res: FileStatus[Read.type])(k: Option[String] => FileStatus[Read.type] => M[X]): M[X] = 
     res match {
       case Xor.Left(e) => k(None)(Xor.Left(e))
       case Xor.Right(FileRead(reader)) => Option(reader.readLine()) match {
@@ -87,10 +88,10 @@ case object ReadLine extends FileIO {
 
 case class WriteString(s: String) extends FileIO {
   type T = Unit
-  type ResI = Xor[ErrorFile, OpenFile[Write.type]]
-  type ResO = Xor[ErrorFile, OpenFile[Write.type]]
+  type ResI = FileStatus[Write.type]
+  type ResO = FileStatus[Write.type]
 
-  def handle[M[_], X](res: Xor[ErrorFile, OpenFile[Write.type]])(k: Unit => Xor[ErrorFile, OpenFile[Write.type]] => M[X]): M[X] =
+  def handle[M[_], X](res: FileStatus[Write.type])(k: Unit => FileStatus[Write.type] => M[X]): M[X] =
     res match {
       case Xor.Left(e) => k(None)(Xor.Left(e))
       case Xor.Right(FileWrite(writer)) => k(writer.write(s))(res)
@@ -100,10 +101,10 @@ case class WriteString(s: String) extends FileIO {
 
 case object IsEOF extends FileIO {
   type T = Boolean
-  type ResI = Xor[ErrorFile, OpenFile[Read.type]]
-  type ResO = Xor[ErrorFile, OpenFile[Read.type]]
+  type ResI = FileStatus[Read.type]
+  type ResO = FileStatus[Read.type]
 
-  def handle[M[_], X](res: Xor[ErrorFile, OpenFile[Read.type]])(k: Boolean => Xor[ErrorFile, OpenFile[Read.type]] => M[X]): M[X] ={
+  def handle[M[_], X](res: FileStatus[Read.type])(k: Boolean => FileStatus[Read.type] => M[X]): M[X] ={
     res match {
       case Xor.Left(e) => k(true)(Xor.Left(e))
       case Xor.Right(FileRead(reader)) =>
@@ -117,18 +118,66 @@ case object IsEOF extends FileIO {
 
 object FileIO {
 
+  trait Labelled[L] {
+    def open[M[_], Mo <: Mode, ES <: HList, ESO <: HList](file: String)(
+      implicit prf: EffElem[FileIO@@L, Unit, FileStatus[Mo], ES, ESO], moder: Moder[Mo]
+    ): EffM[M, Boolean, ES, ESO] =
+      EffM.call[M, FileIO@@L, ES, ESO](Open[Mo](file))
+
+    def close[M[_], Mo <: Mode, ES <: HList, ESO <: HList](
+      implicit prf: EffElem[FileIO@@L, FileStatus[Mo], Unit, ES, ESO], moder: Moder[Mo]
+    ): EffM[M, Unit, ES, ESO] = EffM.call[M, FileIO@@L, ES, ESO](Close[Mo])
+
+    def readLine[M[_], ES <: HList](
+      implicit prf: EffElem[FileIO@@L, FileStatus[Read.type], FileStatus[Read.type], ES, ES]
+    ): EffM[M, Option[String], ES, ES] =
+      EffM.call[M, FileIO@@L, ES, ES](ReadLine)
+
+    def writeString[M[_], ES <: HList](s: String)(
+      implicit prf: EffElem[FileIO@@L, FileStatus[Write.type], FileStatus[Write.type], ES, ES]
+    ): EffM[M, Unit, ES, ES] =
+      EffM.call[M, FileIO@@L, ES, ES](WriteString(s))
+  
+    def writeLine[M[_], ES <: HList](s: String)(
+      implicit prf: EffElem[FileIO@@L, FileStatus[Write.type], FileStatus[Write.type], ES, ES]
+    ): EffM[M, Unit, ES, ES] =
+      writeString(s + "\n")
+
+    def isEof[M[_], ES <: HList](
+      implicit prf: EffElem[FileIO@@L, FileStatus[Read.type], FileStatus[Read.type], ES, ES]
+    ): EffM[M, Boolean, ES, ES] = 
+      EffM.call[M, FileIO@@L, ES, ES](IsEOF)
+  }
+
+  def apply[L] = new Labelled[L] {}
+
   def open[M[_], Mo <: Mode, ES <: HList, ESO <: HList](file: String)(
-    implicit prf: EffElem[FileIO, Unit, Xor[ErrorFile, OpenFile[Mo]], ES, ESO], moder: Moder[Mo]
+    implicit prf: EffElem[FileIO, Unit, FileStatus[Mo], ES, ESO], moder: Moder[Mo]
   ): EffM[M, Boolean, ES, ESO] =
     EffM.call[M, FileIO, ES, ESO](Open[Mo](file))
 
   def close[M[_], Mo <: Mode, ES <: HList, ESO <: HList](
-    implicit prf: EffElem[FileIO, Xor[ErrorFile, OpenFile[Mo]], Unit, ES, ESO], moder: Moder[Mo]
+    implicit prf: EffElem[FileIO, FileStatus[Mo], Unit, ES, ESO], moder: Moder[Mo]
   ): EffM[M, Unit, ES, ESO] = EffM.call[M, FileIO, ES, ESO](Close[Mo])
 
   def readLine[M[_], ES <: HList](
-    implicit prf: EffElem[FileIO, Xor[ErrorFile, OpenFile[Read.type]], Xor[ErrorFile, OpenFile[Read.type]], ES, ES]
+    implicit prf: EffElem[FileIO, FileStatus[Read.type], FileStatus[Read.type], ES, ES]
   ): EffM[M, Option[String], ES, ES] =
     EffM.call[M, FileIO, ES, ES](ReadLine)
+
+  def writeString[M[_], ES <: HList](s: String)(
+    implicit prf: EffElem[FileIO, FileStatus[Write.type], FileStatus[Write.type], ES, ES]
+  ): EffM[M, Unit, ES, ES] =
+    EffM.call[M, FileIO, ES, ES](WriteString(s))
+
+  def writeLine[M[_], ES <: HList](s: String)(
+    implicit prf: EffElem[FileIO, FileStatus[Write.type], FileStatus[Write.type], ES, ES]
+  ): EffM[M, Unit, ES, ES] = 
+    writeString(s + "\n")
+
+  def isEof[M[_], ES <: HList](
+    implicit prf: EffElem[FileIO, FileStatus[Read.type], FileStatus[Read.type], ES, ES]
+  ): EffM[M, Boolean, ES, ES] = 
+    EffM.call[M, FileIO, ES, ES](IsEOF)
 }
 

@@ -10,6 +10,9 @@ import cats.Applicative
 import scala.language.higherKinds
 import scala.language.experimental.macros
 
+import scala.annotation.implicitNotFound
+
+
 /** Effect Algebraic base */
 trait Effect {
   type T
@@ -18,6 +21,7 @@ trait Effect {
 
   def handle[M[_], A](res: ResI)(k: T => ResO => M[A]): M[A]
 }
+
 
 /** EFFECT reification with a resource */
 trait EffectM
@@ -28,7 +32,6 @@ trait Env[M[_], ES0 <: HList] {
 
   type Eff[A] = EffM[M, A, ES, ES]
 
-  // def call[E <: Effect](eff: E)(implicit effElem: EffElem[E, eff.ResI, eff.ResO, ES, ES]) = EffM.call[M, E, ES, ES](eff)
 }
 
 object Env {
@@ -50,6 +53,7 @@ sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList] {
     case LiftP(effP, dropE, rebuildE) => effP.eff(dropE.drop(es))(a => eso => ce(a)(rebuildE.rebuild(eso, es)))
     case New(e, effP) => effP.eff(e :: es)(a => eso => ce(a)(eso.tail))
     case c: CallP[M, t, e, es, eso] => c.execEff(es)(a => eso => ce(a)(eso))
+    // case lbl: 
   }
 
   def map[B, ESO2 <: HList](f: A => B): EffM[M, B, ESI, ESO] = EMap[M, A, B, ESI, ESO](this, f)
@@ -108,11 +112,6 @@ object EffM {
     effP: EffM[M, A, ES, ESO], f: A => B
   ) extends EffM[M, B, ES, ESO]
 
-  // case class Labelled[Label, M[_], A, E <: Effect, Res, ESI <: HList, ESO <: HList](
-  //   lbl: Label,
-  //   effP: EffM[M, A, MkEff[E, Res] :: ESI, ESO]
-  // ) extends EffM[M, A, MkEff[E, LRes[Label, Res]] :: ESI, ESO]
-
   def pure[M[_], ES <: HList, A](a: A): EffM[M, A, ES, ES] = Value(a)
 
   def call[M[_], E <: Effect, ES <: HList, ESO <: HList](eff: E)(
@@ -130,82 +129,44 @@ object EffM {
 
 
 trait EffElem[E <: Effect, Res, ResO, ES <: HList, ESO <: HList] {
-/*(
-  sel: Selector[ES, MkEff[E, Res]],
-  rep: Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]
-)*/  
   def sel(es: ES): MkEff[E, Res]
   def rep(es: ES, r: MkEff[E, ResO]): ESO
 }
 
 object EffElem {
 
-  implicit def mkEffElem[M[_], E <: Effect, Res, ResO, ES <: HList, ESO <: HList]
+  implicit def mkEffElem[E <: Effect, Res, ResO, ES <: HList, ESO <: HList]
+    (implicit
+      sel0: Lazy[Selector[ES, MkEff[E, Res]]]
+    , upd0: Lazy[Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]]
+    ) =
+    new EffElem[E, Res, ResO, ES, ESO] {
+      //(sel, upd)
+      def sel(es: ES): MkEff[E, Res] = sel0.value(es)
+      def rep(es: ES, r: MkEff[E, ResO]): ESO = upd0.value(es, r)
+    }
+
+}
+
+trait EffElemL[L, E <: Effect@@L, Res, ResO, ES <: HList, ESO <: HList] extends EffElem[E, Res, ResO, ES, ESO]{
+  def sel(es: ES): MkEff[E, Res]
+  def rep(es: ES, r: MkEff[E, ResO]): ESO
+}
+
+object EffElemL {
+
+  implicit def mkEffElem[L, E <: Effect@@L, Res, ResO, ES <: HList, ESO <: HList]
     (implicit
       sel0: Selector[ES, MkEff[E, Res]]
     , upd0: Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]
     ) =
-    new EffElem[E, Res, ResO, ES, ESO] {
+    new EffElemL[L, E, Res, ResO, ES, ESO] {
       //(sel, upd)
       def sel(es: ES): MkEff[E, Res] = sel0(es)
       def rep(es: ES, r: MkEff[E, ResO]): ESO = upd0(es, r)
     }
 
-  /*implicit def mkCop[M[_], E <: Effect, Res, H, C <: Coproduct, ES <: HList, ESO <: HList]
-    (implicit
-      sel0: Selector[ES, MkEff[E, Res]]
-    , eh: EffElem[E, Res, H, ES, ESO]
-    , er: EffElem[E, Res, C, ES, ESO]
-    ) =
-    new EffElem[E, Res, H :+: C, ES, ESO] {
-      def sel(es: ES): MkEff[E, Res] = sel0(es)
-      def rep(es: ES, r: MkEff[E, H :+: C]): ESO = r.res match {
-        case Inl(h) => eh.rep(es, MkEff[E, H](h))
-        case Inr(r) => er.rep(es, MkEff[E, C](r))
-      }
-    }*/
 }
-
-trait EffElem0 {
-
-  // implicit def mkCop[M[_], E <: Effect, Res, C <: Coproduct, ES <: HList, ESO <: HList]
-  //   (implicit
-  //     eh: EffElem[E, Res :+: C, Res :+: C, ES, ESO]
-  //   ) =
-  //   new EffElem[E, Res, ResO, ES, ESO] {
-  //     def sel(es: ES): MkEff[E, Res] = eh.sel(es)
-  //     def rep(es: ES, r: MkEff[E, H :+: C]): ESO = r.res match {
-  //       case Inl(h) => eh.rep(es, MkEff[E, H](h))
-  //       case Inr(r) => er.rep(es, MkEff[E, C](r))
-  //     }
-  //   }
-
-  // implicit def mkCop2[M[_], E <: Effect, Res, H, C <: Coproduct, ES <: HList, ESO <: HList]
-  //   (implicit
-  //     sel0: Selector[ES, MkEff[E, Res]]
-  //   , eh: EffElem[E, Res, C, ES, ESO]
-  //   ) =
-  //   new EffElem[E, Res, H, ES, ESO] {
-  //     def sel(es: ES): MkEff[E, Res] = sel0(es)
-  //     def rep(es: ES, r: MkEff[E, H :+: C]): ESO = r.res match {
-  //       case Inl(h) => eh.rep(es, MkEff[E, H](h))
-  //       case Inr(r) => er.rep(es, MkEff[E, C](r))
-  //     }
-  //   }
-
-  // implicit def MkEffElem[M[_], E <: Effect, Res, ResO, ES <: HList, ESO <: HList]
-  //   (implicit
-  //     sel0: Selector[ES, MkEff[E, Res]]
-  //   , upd0: Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]
-  //   ) =
-  //   new EffElem[E, Res, ResO, ES, ESO] {
-  //     //(sel, upd)
-  //     def sel(es: ES): MkEff[E, Res] = sel0(es)
-  //     def rep(es: ES, r: MkEff[E, ResO]): ESO = upd0(es, r)
-  //   }
-
-}
-
 
 trait Rep[L <: HList, U, V] {
   type Out <: HList
@@ -214,12 +175,14 @@ trait Rep[L <: HList, U, V] {
 
 object Rep {
   type Aux[L <: HList, U, V, Out0 <: HList] = Rep[L, U, V] { type Out = Out0 }
-  implicit def rep[L <: HList, U, V, Out0 <: HList](implicit rep: Replacer.Aux[L, U, V, (U, Out0)]): Aux[L, U, V, Out0] =
+  implicit def rep[L <: HList, U, V, Out0 <: HList](implicit rep: Lazy[Replacer.Aux[L, U, V, (U, Out0)]]): Aux[L, U, V, Out0] =
     new Rep[L, U, V] {
       type Out = Out0
-      def apply(l: L, v: V): Out = rep(l, v)._2
+      def apply(l: L, v: V): Out = rep.value(l, v)._2
     }
 }
+
+
 
 trait DropE[Small <: HList, Big <: HList] {
   def drop(e: Big): Small
