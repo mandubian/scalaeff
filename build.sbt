@@ -31,7 +31,7 @@ lazy val root = project.in(file("."))
   .settings(name := "scalaeff")
   .settings(
     libraryDependencies ++= Seq(
-        "com.chuusai"     %%  "shapeless"        % "2.2.4"
+        "com.chuusai"     %%  "shapeless"        % "2.2.5"
       , "org.scalatest"   %%  "scalatest"        % "2.2.1"   % "test"
       , "org.spire-math"  %%  "cats"             % "0.2.0"
       , "org.typelevel"   %%  "export-hook"      % "1.1.0"

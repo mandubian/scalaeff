@@ -19,7 +19,7 @@ package stdio
 import shapeless._
 
 
-sealed trait StdIO extends Effect
+/*sealed trait StdIO extends Effect
 
 case class PutStr(s: String) extends StdIO {
   type T = Unit
@@ -56,28 +56,28 @@ case object GetChar extends StdIO {
 
 object StdIO {
 
-  def putStr[M[_], ES <: HList](s: String)(implicit prf: EffElem[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
-    EffM.call[M, StdIO, ES, ES](PutStr(s))
+  def putStr[M[_], ES <: HList](s: String)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
+    EffM.call[M, StdIO, ES](PutStr(s))
 
-  def putStrLn[M[_], ES <: HList](s: String)(implicit prf: EffElem[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
-    EffM.call[M, StdIO, ES, ES](PutStr(s + "\n"))
+  def putStrLn[M[_], ES <: HList](s: String)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
+    EffM.call[M, StdIO, ES](PutStr(s + "\n"))
 
-  def putChar[M[_], ES <: HList](c: Char)(implicit prf: EffElem[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
-    EffM.call[M, StdIO, ES, ES](PutChar(c))
+  def putChar[M[_], ES <: HList](c: Char)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
+    EffM.call[M, StdIO, ES](PutChar(c))
 
-  def putCharLn[M[_], ES <: HList](c: Char)(implicit prf: EffElem[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
-    EffM.call[M, StdIO, ES, ES](PutStr(c + "\n"))
+  def putCharLn[M[_], ES <: HList](c: Char)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
+    EffM.call[M, StdIO, ES](PutStr(c + "\n"))
 
-  def getStr[M[_], ES <: HList](implicit prf: EffElem[StdIO, Unit, Unit, ES, ES]): EffM[M, String, ES, ES] =
-    EffM.call[M, StdIO, ES, ES](GetStr)
+  def getStr[M[_], ES <: HList](implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, String, ES, ES] =
+    EffM.call[M, StdIO, ES](GetStr)
 
-  def getChar[M[_], ES <: HList](implicit prf: EffElem[StdIO, Unit, Unit, ES, ES]): EffM[M, Char, ES, ES] =
-    EffM.call[M, StdIO, ES, ES](GetChar)
+  def getChar[M[_], ES <: HList](implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Char, ES, ES] =
+    EffM.call[M, StdIO, ES](GetChar)
 
-  def print[M[_], A, ES <: HList](a: A)(implicit prf: EffElem[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
+  def print[M[_], A, ES <: HList](a: A)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
     putStr(a.toString)
 
-  def println[M[_], A, ES <: HList](a: A)(implicit prf: EffElem[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
+  def println[M[_], A, ES <: HList](a: A)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
     putStrLn(a.toString)
 
-}
+}*/

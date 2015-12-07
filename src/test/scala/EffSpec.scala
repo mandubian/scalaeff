@@ -13,9 +13,9 @@ import cats.data.Xor
 
 import shapeless._
 
-import file._
+// import file._
 import state._
-import stdio._
+// import stdio._
 
 class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 
@@ -28,8 +28,117 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
   case object Bar extends Label
   type Bar = Bar.type
 
+  "Eff" should "State" in {
 
-  "State" should "StateEnv" in {
+    // type ES = State<>Foo@@Int :: HNil
+    // type ES2 = State<>Foo@@String :: HNil
+
+    val effectful = Effectful[
+      Future,
+      (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+      (State@@Foo<>String) :: (State@@Bar<>String) :: HNil
+    ]
+
+    import effectful._
+
+    // implicitly[FlatMappable.Aux[
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil
+    // ]]
+
+    // implicitly[FlatMappable.Aux[
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Bar<>String) :: HNil,
+    //   (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil
+    // ]]
+
+    // implicitly[FlatMappable.Aux[
+    //   (State@@Foo<>Int) :: HNil,
+    //   (State@@Foo<>Int) :: HNil,
+    //   (State@@Bar<>String) :: HNil,
+    //   (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil
+    // ]]
+
+    // FlatMappable.one[
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: HNil,
+    //   (State@@Foo<>Int) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil
+    // ]
+
+    // val eff0: EffM[
+    //   Future, Unit,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //   (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil
+    // ] = State[Foo].put(3).flatMap { _ => State[Bar].put("works") }
+
+    // implicitly[
+    //   IsoList[
+    //     (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+    //     (State@@Bar<>String) :: (State@@Foo<>Int) :: HNil
+    //   ]
+    // ]
+
+    IsoList.tail[
+      (State@@Foo<>Int), (State@@Bar<>String) :: HNil,
+      (State@@Bar<>String) :: (State@@Foo<>Int) :: HNil,
+      (State@@Bar<>String) :: HNil
+    ]
+    FlatMappable.iso[
+      (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+      (State@@Foo<>Int) :: (State@@Bar<>String) :: HNil,
+      (State@@Bar<>String) :: (State@@Foo<>Int) :: HNil,
+      (State@@Bar<>String) :: (State@@Foo<>Int) :: HNil
+    ]
+
+
+    val eff: EffM[Future, Int, ESI, ESO] = for {
+      _   <- State[Foo].put(3)
+      _   <- State[Bar].put("works")
+      k   <- State[Foo].get[Int]
+      k2  <- State[Bar].get[String]
+      _   <- State[Foo].putB[Future, Int, String](k.toString + k2)
+      // k3  <- State[Foo].get[String]
+    } yield (k)
+
+    // type ESI2 = (State@@Bar<>String) :: (State@@Foo<>Int) :: HNil
+
+    // val eff2 = 
+    //   State[Foo].put(3).flatMap { _ =>
+    //     State[Bar].put("works").flatMap { _ =>
+    //       State[Foo].get[Int].map(k => k)
+    //     }
+    //   }
+
+
+    // val eff: EffM[Future, String, ES, ES2] = for {
+    //   _ <- State.put[Future, Int @@ Foo, ES](5)
+    //   _ <- State.put[Future, Int @@ Bar, ES](10)
+    //   _ <- State.update[Future, Int @@ Foo, ES](i => i + 7)
+    //   i <- State.get[Future, Int @@ Foo, ES]
+    //   _ <- State.update[Future, Int @@ Bar, ES](j => i + j + 8)
+    //   j <- State.get[Future, Int @@ Bar, ES]
+    //   _ <- State.putM[Future, Int @@ Foo, String, ES](s"toto_$j")      
+    //   k <- State.get
+    // } yield (k)
+
+    val r = eff.run(MkEff[State@@Foo, Int](0) :: MkEff[State@@Bar, String]("") :: HNil).futureValue
+
+    println("Res:"+r)
+    // r should equal ("3works")
+  }
+
+  /*"State" should "StateEnv" in {
     val env = Env[Future, MkEff[State, Int @@ Foo] :: MkEff[State, Int @@ Bar] :: HNil]
     import env._
 
@@ -194,5 +303,16 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
     println(s"Read/Write $r lines")
   }
 
-  
+  it should "FileIO read + write 2" in {
+    type ES =   (FileIO<>Unit) ::
+                HNil
+
+    type ES2 =  (FileIO<>FileStatus[Read.type]) ::
+                HNil
+
+    val eff: EffM[Future, ] = for {
+      r <-  FileIO.open2[Future, Read.type, ES]("toto.txt")
+      r <-  FileIO.close2[Future, Read.type, ES2]
+    } yield (())
+  }*/
 }
