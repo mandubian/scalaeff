@@ -70,8 +70,8 @@ sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList] {
 
     case EFlatMap(effP, f, prf) =>
           effP.eff(prf.downI(es)) { a => eso =>
-            f(a).eff(prf.upO(es, eso)) { a => eso2 =>
-              ce(a)(prf.upO2(eso, eso2))
+            f(a).eff(prf.out2in(es, eso)) { a => eso2 =>
+              ce(a)(prf.buildOut(eso, eso2))
             }
           }
 
@@ -281,8 +281,8 @@ trait FlatMappable[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList] {
   type OutESO <: HList
 
   def downI(esi: OutESI): ESI
-  def upO(esi: OutESI, eso: ESO): ESI2
-  def upO2(eso: ESO, eso2: ESO2): OutESO
+  def out2in(esi: OutESI, eso: ESO): ESI2
+  def buildOut(eso: ESO, eso2: ESO2): OutESO
 }
 
 
@@ -291,32 +291,31 @@ object FlatMappable extends FlatMappable2 {
   type Aux[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, OutESI0 <: HList, OutESO0 <: HList] =
     FlatMappable[ESI, ESO, ESI2, ESO2] { type OutESI = OutESI0 ; type OutESO = OutESO0 }
 
-  // TODO manage ESO2
-  // SAME LIST
+  // ESO == ESI2
   implicit def iso[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList](
-    implicit  isoI: IsoList[ESI, ESI2],
-              isoO: IsoList[ESO, ESO2]
+    implicit  isoI: IsoList[ESO, ESI2],
+              // we need to transform internal output into external output
+              isoO: IsoList[ESO2, ESO]
   ): FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI, ESO] = new FlatMappable[ESI, ESO, ESI2, ESO2] {
     type OutESI = ESI
     type OutESO = ESO
 
     def downI(esi: ESI): ESI = esi
-    def upO(esi: ESI, eso: ESO): ESI2 = isoI(esi)
-    def upO2(eso: ESO, eso2: ESO2): ESO = eso
+    def out2in(esi: ESI, eso: ESO): ESI2 = isoI(eso)
+    def buildOut(eso: ESO, eso2: ESO2): ESO = isoO(eso2)
   }
 
-  // ESI >> ESI2
-  implicit def one[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESO3 <: HList](
-    implicit 
-      dropEO: DropE[ESI2, ESI],
-      rebuildEO2: RebuildEO[ESO, ESO2, ESO3]
+  // ESO >> ESI2
+  implicit def ESOBiggerThanESI2[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESO3 <: HList](
+    implicit  drop: DropE[ESI2, ESO],
+              rebuild: RebuildEO[ESO, ESO2, ESO3]
   ): FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI, ESO3] = new FlatMappable[ESI, ESO, ESI2, ESO2] {
     type OutESI = ESI
     type OutESO = ESO3
 
     def downI(esi: ESI): ESI = esi
-    def upO(esi: ESI, eso: ESO): ESI2 = dropEO.drop(esi)
-    def upO2(eso: ESO, eso2: ESO2): ESO3 = rebuildEO2.rebuild(eso, eso2)
+    def out2in(esi: ESI, eso: ESO): ESI2 = drop.drop(eso)
+    def buildOut(eso: ESO, eso2: ESO2): ESO3 = rebuild.rebuild(eso, eso2)
   }
 
 
@@ -324,8 +323,8 @@ object FlatMappable extends FlatMappable2 {
 
 trait FlatMappable2 extends FlatMappable3 {
 
-  // ESI << ESI2
-  implicit def two[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList](
+  // ESI << ESI2, ESO << ESI2
+  implicit def ESOSmallerThanESI2[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList](
     implicit 
       dropE: DropE[ESI, ESI2]
     , rebuildE: RebuildEO[ESI2, ESO, ESI2]
@@ -335,8 +334,8 @@ trait FlatMappable2 extends FlatMappable3 {
     type OutESO = ESO2
 
     def downI(esi: ESI2): ESI = dropE.drop(esi)
-    def upO(esi: ESI2, eso: ESO): ESI2 = rebuildE.rebuild(esi, eso)
-    def upO2(eso: ESO, eso2: ESO2): ESO2 = rebuildE2.rebuild(eso, eso2)
+    def out2in(esi: ESI2, eso: ESO): ESI2 = rebuildE.rebuild(esi, eso)
+    def buildOut(eso: ESO, eso2: ESO2): ESO2 = rebuildE2.rebuild(eso, eso2)
   }
 
   // ESO == ESI2 with different output type
@@ -359,20 +358,19 @@ trait FlatMappable2 extends FlatMappable3 {
 trait FlatMappable3 {
 
   // ESI ++ ESI2 && ESO ++ ESO2
-  implicit def sub[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESI3 <: HList, ESO3 <: HList](
+  implicit def ESIESOPrepend[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESI3 <: HList, ESO3 <: HList](
     implicit prepI: Prepend.Aux[ESI, ESI2, ESI3],
-    prepO: Prepend.Aux[ESO, ESO2, ESO3],
-    dropI: DropE[ESI, ESI3],
-    dropI2: DropE[ESI2, ESI3],
-    // rebuildEO: RebuildEO[ESI3, ESO, ESI2],
-    rebuildEO2: RebuildEO[ESO, ESO2, ESO3]
+             prepO: Prepend.Aux[ESO, ESO2, ESO3],
+             dropI: DropE[ESI, ESI3],
+             dropI2: DropE[ESI2, ESI3],
+             rebuildEO2: RebuildEO[ESO, ESO2, ESO3]
   ): FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI3, ESO3] = new FlatMappable[ESI, ESO, ESI2, ESO2] {
     type OutESI = ESI3
     type OutESO = ESO3
 
     def downI(esi: ESI3): ESI = dropI.drop(esi)
-    def upO(esi: ESI3, eso: ESO): ESI2 = dropI2.drop(esi)
-    def upO2(eso: ESO, eso2: ESO2): ESO3 = rebuildEO2.rebuild(eso, eso2)
+    def out2in(esi: ESI3, eso: ESO): ESI2 = dropI2.drop(esi)
+    def buildOut(eso: ESO, eso2: ESO2): ESO3 = rebuildEO2.rebuild(eso, eso2)
   }
 }
 
@@ -553,14 +551,14 @@ trait RebuildE4 {
 
 trait Ctx {
   type M[_]
+
+  // def app: Applicative[M]
 }
 
-trait HasESI {
-  type ES <: HList
-}
+object Ctx {
+  type Aux[M0[_]] = Ctx { type M[a] = M0[a] }
 
-trait HasESO {
-  type ES <: HList
+  // implicit def toApp(ctx: Ctx): Applicative[ctx.M] = ctx.app
 }
 
 trait Effectful[M0[_], ESI0 <: HList, ESO0 <: HList] {
@@ -583,3 +581,4 @@ trait Effectful[M0[_], ESI0 <: HList, ESO0 <: HList] {
 object Effectful {
   def apply[M[_], ESI <: HList, ESO <: HList] = new Effectful[M, ESI, ESO] { }
 }
+

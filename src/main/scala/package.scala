@@ -18,7 +18,7 @@ import shapeless._
 import scala.language.experimental.macros
 
 
-package object effects {
+package object effects extends Effectives {
 
   object tag {
     def apply[U] = new Tagger[U]
@@ -40,4 +40,5 @@ package object effects {
   )(
     implicit dropE: DropE[ESI, Super], rebuildEO: RebuildEO[Super, ESO, SuperO]
   ): EffM[M, A, Super, SuperO] = eff.lift2[Super, SuperO]
+
 }
