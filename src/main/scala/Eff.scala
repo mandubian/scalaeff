@@ -306,17 +306,17 @@ object FlatMappable extends FlatMappable2 {
   }
 
   // ESO >> ESI2
-  implicit def ESOBiggerThanESI2[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESO3 <: HList](
-    implicit  drop: DropE[ESI2, ESO],
-              rebuild: RebuildEO[ESO, ESO2, ESO3]
-  ): FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI, ESO3] = new FlatMappable[ESI, ESO, ESI2, ESO2] {
-    type OutESI = ESI
-    type OutESO = ESO3
+  // implicit def ESOBiggerThanESI2[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESO3 <: HList](
+  //   implicit  drop: DropE[ESI2, ESO],
+  //             rebuild: RebuildEO[ESO, ESO2, ESO3]
+  // ): FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI, ESO3] = new FlatMappable[ESI, ESO, ESI2, ESO2] {
+  //   type OutESI = ESI
+  //   type OutESO = ESO3
 
-    def downI(esi: ESI): ESI = esi
-    def out2in(esi: ESI, eso: ESO): ESI2 = drop.drop(eso)
-    def buildOut(eso: ESO, eso2: ESO2): ESO3 = rebuild.rebuild(eso, eso2)
-  }
+  //   def downI(esi: ESI): ESI = esi
+  //   def out2in(esi: ESI, eso: ESO): ESI2 = drop.drop(eso)
+  //   def buildOut(eso: ESO, eso2: ESO2): ESO3 = rebuild.rebuild(eso, eso2)
+  // }
 
 
 }
@@ -324,7 +324,7 @@ object FlatMappable extends FlatMappable2 {
 trait FlatMappable2 extends FlatMappable3 {
 
   // ESI << ESI2, ESO << ESI2
-  implicit def ESOSmallerThanESI2[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList](
+  implicit def ESIAndESOSmallerThanESI2[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList](
     implicit 
       dropE: DropE[ESI, ESI2]
     , rebuildE: RebuildEO[ESI2, ESO, ESI2]
@@ -337,6 +337,12 @@ trait FlatMappable2 extends FlatMappable3 {
     def out2in(esi: ESI2, eso: ESO): ESI2 = rebuildE.rebuild(esi, eso)
     def buildOut(eso: ESO, eso2: ESO2): ESO2 = rebuildE2.rebuild(eso, eso2)
   }
+
+
+
+
+// FileIO<>FileStatus
+// StdIO :: FileIO<>FileStatus
 
   // ESO == ESI2 with different output type
   // implicit def three[E <: Effect, H, H2, ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESO1 <: HList](
@@ -356,6 +362,28 @@ trait FlatMappable2 extends FlatMappable3 {
 }
 
 trait FlatMappable3 {
+
+  // MkEff[S, A1] :: MkEff[U, B] :: MkEff[W, D] => MkEff[S, A2] => MkEff[S, A2] :: MkEff[U, B] :: MkEff[V, C]
+
+  // ESO << ESI2 but different type
+  implicit def ESOSmallerThanESI2Different[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESII <: HList, ESIII <: HList](
+    implicit 
+      dropE: DropE[ESO, ESI2]
+    , removeAll: RemoveAll.Aux[ESI2, ESO, (ESO, ESII)]
+    , merge: Merge.Aux[ESI, ESII, ESIII]
+    , dropEI: DropE[ESI, ESIII]
+    , rebuildE2: RebuildEO[ESO, ESO2, ESO2]
+  ): FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESIII, ESO2] = new FlatMappable[ESI, ESO, ESI2, ESO2] {
+    type OutESI = ESIII
+    type OutESO = ESO2
+
+    def downI(esi: ESIII): ESI = dropEI.drop(esi)
+    def out2in(esiii: ESIII, eso: ESO): ESI2 = {
+      val (esi, esii) = merge.resplit(esiii)
+      removeAll.reinsert((eso, esii))
+    }
+    def buildOut(eso: ESO, eso2: ESO2): ESO2 = rebuildE2.rebuild(eso, eso2)
+  }
 
   // ESI ++ ESI2 && ESO ++ ESO2
   implicit def ESIESOPrepend[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESI3 <: HList, ESO3 <: HList](
@@ -438,6 +466,46 @@ object Remove extends LowPriorityRemove {
     }
 }
 
+/**
+ * Type class supporting removal of a sublist from this `HList`. Available only if this `HList` contains a
+ * sublist of type `SL`.
+ *
+ * The elements of `SL` do not have to be contiguous in this `HList`.
+ *
+ * @author Stacy Curl
+ */
+@implicitNotFound("Implicit not found: shapeless.Ops.RemoveAll[${L}, ${SL}]. You requested to remove elements of the types ${SL}, but not all were found in HList ${L}.")
+trait RemoveAll[L <: HList, SL <: HList] extends DepFn1[L] with Serializable {
+  def reinsert(out: Out): L
+}
+
+object RemoveAll {
+  def apply[L <: HList, SL <: HList](implicit remove: RemoveAll[L, SL]): Aux[L, SL, remove.Out] = remove
+
+  type Aux[L <: HList, SL <: HList, Out0] = RemoveAll[L, SL] { type Out = Out0 }
+
+  implicit def hlistRemoveAllNil[L <: HList]: Aux[L, HNil, (HNil, L)] =
+    new RemoveAll[L, HNil] {
+      type Out = (HNil, L)
+      def apply(l : L): Out = (HNil, l)
+
+      def reinsert(out: (HNil, L)): L = out._2
+    }
+
+  implicit def hlistRemoveAll[L <: HList, E, RemE <: HList, Rem <: HList, SLT <: HList]
+    (implicit rt : Remove.Aux[L, E, (E, RemE)], st : Aux[RemE, SLT, (SLT, Rem)]): Aux[L, E :: SLT, (E :: SLT, Rem)] =
+      new RemoveAll[L, E :: SLT] {
+        type Out = (E :: SLT, Rem)
+        def apply(l : L): Out = {
+          val (e, rem) = rt(l)
+          val (sl, left) = st(rem)
+          (e :: sl, left)
+        }
+
+        def reinsert(out: (E :: SLT, Rem)): L =
+          rt.reinsert((out._1.head, st.reinsert((out._1.tail, out._2))))
+      }
+}
 
 trait DropE[Small <: HList, Big <: HList] {
   def drop(e: Big): Small
@@ -506,47 +574,112 @@ trait RebuildEO2 {
   
 }
 
-trait RebuildE[Ref <: HList, Small <: HList, Big <: HList] {
-  def rebuild(es1: Ref, es2: Big): Ref
+trait Merge[HL1 <: HList, HL2 <: HList] {
+  type Out <: HList
+  def merge(hl1: HL1, hl2: HL2): Out
+  def resplit(out: Out): (HL1, HL2)
 }
 
-object RebuildE extends RebuildE2 {
+object Merge extends Merge2 {
+  type Aux[HL1 <: HList, HL2 <: HList, Out0 <: HList] = Merge[HL1, HL2] { type Out = Out0 }
 
-  implicit object nil extends RebuildE[HNil, HNil, HNil] {
-    def rebuild(es1: HNil, es2: HNil): HNil = HNil
+  // implicit val nil: Merge.Aux[HNil, HNil, HNil] = new Merge[HNil, HNil] {
+  //   type Out = HNil
+  //   def merge(hl1: HNil, hl2: HNil): HNil = HNil
+  // }
+
+  implicit def rightNil[HL2 <: HList]: Merge.Aux[HNil, HL2, HL2] = new Merge[HNil, HL2] {
+    type Out = HL2
+    def merge(hl1: HNil, hl2: HL2): HL2 = hl2
+
+    def resplit(out: HL2): (HNil, HL2) = (HNil, out)
   }
 
-}
+  implicit def leftNil[HL1 <: HList]: Merge.Aux[HL1, HNil, HL1] = new Merge[HL1, HNil] {
+    type Out = HL1
+    def merge(hl1: HL1, hl2: HNil): HL1 = hl1
 
-trait RebuildE2 extends RebuildE3 {
-
-  implicit def rightNil[H, XS <: HList] = new RebuildE[H :: XS, HNil, HNil] {
-    def rebuild(es1: H :: XS, es2: HNil): H :: XS = es1
+    def resplit(out: HL1): (HL1, HNil) = (out, HNil)
   }
 
-}
-
-trait RebuildE3 extends RebuildE4 {
-
-  implicit def leftNil[XH, XS <: HList] = new RebuildE[HNil, XH :: XS, XH :: XS] {
-    def rebuild(es1: HNil, es2: XH :: XS): HNil = es1
-  }
-
-  implicit def keepLeft[XH, XS <: HList, YH, YS <: HList](implicit sub: RebuildE[YS, XS, XS]) =
-    new RebuildE[YH :: YS , XH :: XS , XH :: XS] {
-      def rebuild(es1: YH :: YS, es2: XH :: XS): YH :: YS = es1.head :: sub.rebuild(es1.tail, es2.tail)
+  implicit def headInHL2[H1, HL1 <: HList, HL2 <: HList, HLO <: HList, HLO2 <: HList](
+    implicit rem: Remove.Aux[HL2, H1, (H1, HLO)],
+             sub: Merge.Aux[HL1, HLO, HLO2]
+  ): Merge.Aux[H1 :: HL1, HL2, H1 :: HLO2] = new Merge[H1 :: HL1, HL2] {
+    type Out = H1 :: HLO2
+    def merge(hl1: H1 :: HL1, hl2: HL2): H1 :: HLO2 = {
+      val (h1, hlo) = rem(hl2)
+      h1 :: sub.merge(hl1.tail, hlo)
     }
 
+    def resplit(out: H1 :: HLO2): (H1 :: HL1, HL2) = {
+      val (l1, l2) = sub.resplit(out.tail)
+      (out.head :: l1, rem.reinsert(out.head, l2))
+    }
+  }
+
 }
 
-trait RebuildE4 {
-
-  implicit def dropRight[XH, XS <: HList, YS <: HList](implicit sub: RebuildE[YS, XS, XS]) =
-    new RebuildE[YS, XH :: XS, XH :: XS] {
-      def rebuild(es1: YS, es2: XH :: XS): YS = sub.rebuild(es1, es2.tail)
+trait Merge2 {
+  implicit def headNotInHL2[H1, HL1 <: HList, HL2 <: HList, HLO <: HList](
+    implicit sub: Merge.Aux[HL1, HL2, HLO]
+  ): Merge.Aux[H1 :: HL1, HL2, H1 :: HLO] = new Merge[H1 :: HL1, HL2] {
+    type Out = H1 :: HLO
+    def merge(hl1: H1 :: HL1, hl2: HL2): H1 :: HLO = {
+      hl1.head :: sub.merge(hl1.tail, hl2)
     }
 
+    def resplit(out: H1 :: HLO): (H1 :: HL1, HL2) = {
+      val (l1, l2) = sub.resplit(out.tail)
+      (out.head :: l1, l2)
+    }
+  }
 }
+
+
+// trait RebuildE[Ref <: HList, Small <: HList, Big <: HList] {
+//   def rebuild(es1: Ref, es2: Big): Ref
+// }
+
+
+
+// object RebuildE extends RebuildE2 {
+
+//   implicit object nil extends RebuildE[HNil, HNil, HNil] {
+//     def rebuild(es1: HNil, es2: HNil): HNil = HNil
+//   }
+
+// }
+
+// trait RebuildE2 extends RebuildE3 {
+
+//   implicit def rightNil[H, XS <: HList] = new RebuildE[H :: XS, HNil, HNil] {
+//     def rebuild(es1: H :: XS, es2: HNil): H :: XS = es1
+//   }
+
+// }
+
+// trait RebuildE3 extends RebuildE4 {
+
+//   implicit def leftNil[XH, XS <: HList] = new RebuildE[HNil, XH :: XS, XH :: XS] {
+//     def rebuild(es1: HNil, es2: XH :: XS): HNil = es1
+//   }
+
+//   implicit def keepLeft[XH, XS <: HList, YH, YS <: HList](implicit sub: RebuildE[YS, XS, XS]) =
+//     new RebuildE[YH :: YS , XH :: XS , XH :: XS] {
+//       def rebuild(es1: YH :: YS, es2: XH :: XS): YH :: YS = es1.head :: sub.rebuild(es1.tail, es2.tail)
+//     }
+
+// }
+
+// trait RebuildE4 {
+
+//   implicit def dropRight[XH, XS <: HList, YS <: HList](implicit sub: RebuildE[YS, XS, XS]) =
+//     new RebuildE[YS, XH :: XS, XH :: XS] {
+//       def rebuild(es1: YS, es2: XH :: XS): YS = sub.rebuild(es1, es2.tail)
+//     }
+
+// }
 
 
 trait Ctx {

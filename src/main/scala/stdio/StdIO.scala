@@ -19,7 +19,7 @@ package stdio
 import shapeless._
 
 
-/*sealed trait StdIO extends Effect
+sealed trait StdIO extends Effect
 
 case class PutStr(s: String) extends StdIO {
   type T = Unit
@@ -56,28 +56,57 @@ case object GetChar extends StdIO {
 
 object StdIO {
 
-  def putStr[M[_], ES <: HList](s: String)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
-    EffM.call[M, StdIO, ES](PutStr(s))
+  // PUTSTR
+  def putStr0[M[_]](s: String): EffM[M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    EffM.call[M, StdIO, MkEff[StdIO, Unit] :: HNil](PutStr(s))
 
-  def putStrLn[M[_], ES <: HList](s: String)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
-    EffM.call[M, StdIO, ES](PutStr(s + "\n"))
+  def putStr(s: String)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    putStr0(s)
 
-  def putChar[M[_], ES <: HList](c: Char)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
-    EffM.call[M, StdIO, ES](PutChar(c))
+  def putStrLn0[M[_]](s: String): EffM[M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    putStr0(s + "\n")
 
-  def putCharLn[M[_], ES <: HList](c: Char)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
-    EffM.call[M, StdIO, ES](PutStr(c + "\n"))
+  def putStrLn(s: String)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    putStrLn0(s)
 
-  def getStr[M[_], ES <: HList](implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, String, ES, ES] =
-    EffM.call[M, StdIO, ES](GetStr)
+  // PUTCHAR
+  def putChar0[M[_]](c: Char): EffM[M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    EffM.call[M, StdIO, MkEff[StdIO, Unit] :: HNil](PutChar(c))
 
-  def getChar[M[_], ES <: HList](implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Char, ES, ES] =
-    EffM.call[M, StdIO, ES](GetChar)
+  def putChar(c: Char)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    putChar(c)
 
-  def print[M[_], A, ES <: HList](a: A)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
-    putStr(a.toString)
+  def putCharLn0[M[_]](c: Char): EffM[M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    putStr0(c + "\n")
 
-  def println[M[_], A, ES <: HList](a: A)(implicit prf: EffElem.Aux[StdIO, Unit, Unit, ES, ES]): EffM[M, Unit, ES, ES] =
-    putStrLn(a.toString)
+  def putCharLn(c: Char)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    putCharLn0(c)
 
-}*/
+  // GETSTR
+  def getStr0[M[_]](): EffM[M, String, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    EffM.call[M, StdIO, MkEff[StdIO, Unit] :: HNil](GetStr)
+
+  def getStr()(implicit ctx: Ctx): EffM[ctx.M, String, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    getStr0()
+
+  // GETCHAR
+  def getChar0[M[_]](): EffM[M, Char, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    EffM.call[M, StdIO, MkEff[StdIO, Unit] :: HNil](GetChar)
+
+  def getChar()(implicit ctx: Ctx): EffM[ctx.M, Char, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    getChar0()
+
+  // PRINT
+  def print0[M[_], A](a: A): EffM[M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    putStr0(a.toString)
+
+  def print[A](a: A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    print0(a)
+
+  def println0[M[_], A](a: A): EffM[M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    putStrLn0(a.toString)
+
+  def println[A](a: A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
+    println0(a)
+
+}

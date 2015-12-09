@@ -12,10 +12,11 @@ import cats.std.future._
 import cats.data.Xor
 
 import shapeless._
+import ops.hlist._
 
-// import file._
+import file._
 import state._
-// import stdio._
+import stdio._
 
 class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 
@@ -27,7 +28,7 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
   type Foo = Foo.type
   case object Bar extends Label
   type Bar = Bar.type
-
+/*
   "Eff" should "flatMap isoList" in {
     val eff = State[Foo].put0[Future, Int](3).lift[(State@@Foo<>Int) :: (State@@Bar<>String) :: HNil].flatMap { _ => 
       State[Bar].put0[Future, String]("works").lift[(State@@Bar<>String) :: (State@@Foo<>Int) :: HNil]
@@ -158,6 +159,49 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 
     println("Res:"+r)
     r should equal ("3works")
+  }
+
+  it should "mix State & StdIO" in {
+    val eff = effective[Future, (State@@Foo<>Int) :: (State@@Bar<>String) :: (StdIO<>Unit) :: HNil]{ implicit ctx =>
+      for {
+        // _   <- StdIO.println(s"Enter it:")
+        // s   <- StdIO.getStr()
+        _   <- State[Foo].put(3)
+        // _   <- State[Bar].put(s"works_$s")
+        _   <- State[Bar].put(s"works")
+        k   <- State[Foo].get[Int]
+        _   <- StdIO.println(s"Foo $k")
+        k2  <- State[Bar].get[String]
+        _   <- StdIO.println(s"Bar $k2")
+        _   <- State[Foo].putM[Int, String](k.toString + k2)
+        k3  <- State[Foo].get[String]
+      } yield (k3)
+      // } yield (s -> k3)
+    }
+
+    // val (s, r) = eff.run(MkEff[State@@Foo, Int](0) :: MkEff[State@@Bar, String]("") :: MkEff[StdIO, Unit](()) :: HNil).futureValue
+    val r = eff.run(MkEff[State@@Foo, Int](0) :: MkEff[State@@Bar, String]("") :: MkEff[StdIO, Unit](()) :: HNil).futureValue
+
+    println("Res:"+r)
+    // r should equal (s"3works_$s")
+    r should equal ("3works")
+  }
+*/
+  it should "simple FileIO" in {
+
+    val eff = effective[Future] { implicit ctx =>
+      for {
+        b <-  FileIO.open[Read.type]("toto.txt")
+        _ <-  b match {
+                case true => StdIO.println("Opened")
+                case false => StdIO.println("Can't Open")
+              }
+        _ <-  FileIO.close[Read.type]
+      } yield (())
+    }
+    val r = eff.run(MkEff[FileIO, Unit](()) :: MkEff[StdIO, Unit](()) :: HNil).futureValue
+    println("Res:"+r)
+ 
   }
 
   /*it should "FileIO" in {
@@ -293,6 +337,25 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
   }*/
 }
 
+    // implicitly[RemoveAll.Aux[
+    //   MkEff[StdIO, Unit] :: MkEff[FileIO, FileStatus[Read.type]] :: HNil,
+    //   MkEff[FileIO, FileStatus[Read.type]] :: HNil,
+    //   (MkEff[FileIO, FileStatus[Read.type]] :: HNil, MkEff[StdIO, Unit] :: HNil)
+    // ]]
+
+    // implicitly[Merge.Aux[
+    //   MkEff[StdIO, Unit] :: MkEff[FileIO, FileStatus[Read.type]] :: HNil,
+    //   MkEff[StdIO, Unit] :: HNil,
+    //   MkEff[StdIO, Unit] :: MkEff[FileIO, FileStatus[Read.type]] :: HNil
+    // ]]
+    // FlatMappable.ESOSmallerThanESI2Different[
+    //   MkEff[FileIO, Unit] :: HNil,
+    //   MkEff[FileIO, FileStatus[Read.type]] :: HNil,
+    //   MkEff[StdIO, Unit] :: MkEff[FileIO, FileStatus[Read.type]] :: HNil,
+    //   MkEff[StdIO, Unit] :: MkEff[FileIO, Unit] :: HNil,
+    //   MkEff[StdIO, Unit] :: HNil,
+    //   MkEff[FileIO, Unit] :: MkEff[StdIO, Unit] :: HNil
+    // ]
 
 
     // implicitly[FlatMappable.Aux[
