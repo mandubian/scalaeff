@@ -306,17 +306,17 @@ object FlatMappable extends FlatMappable2 {
   }
 
   // ESO >> ESI2
-  // implicit def ESOBiggerThanESI2[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESO3 <: HList](
-  //   implicit  drop: DropE[ESI2, ESO],
-  //             rebuild: RebuildEO[ESO, ESO2, ESO3]
-  // ): FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI, ESO3] = new FlatMappable[ESI, ESO, ESI2, ESO2] {
-  //   type OutESI = ESI
-  //   type OutESO = ESO3
+  implicit def ESOBiggerThanESI2[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESO3 <: HList](
+    implicit  drop: DropE[ESI2, ESO],
+              rebuild: RebuildEO[ESO, ESO2, ESO3]
+  ): FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI, ESO3] = new FlatMappable[ESI, ESO, ESI2, ESO2] {
+    type OutESI = ESI
+    type OutESO = ESO3
 
-  //   def downI(esi: ESI): ESI = esi
-  //   def out2in(esi: ESI, eso: ESO): ESI2 = drop.drop(eso)
-  //   def buildOut(eso: ESO, eso2: ESO2): ESO3 = rebuild.rebuild(eso, eso2)
-  // }
+    def downI(esi: ESI): ESI = esi
+    def out2in(esi: ESI, eso: ESO): ESI2 = drop.drop(eso)
+    def buildOut(eso: ESO, eso2: ESO2): ESO3 = rebuild.rebuild(eso, eso2)
+  }
 
 
 }
@@ -384,6 +384,27 @@ trait FlatMappable3 {
     }
     def buildOut(eso: ESO, eso2: ESO2): ESO2 = rebuildE2.rebuild(eso, eso2)
   }
+
+  // ESO >> ESI2 but different type
+  // implicit def ESOBiggerThanESI2Different[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESII <: HList, ESIII <: HList](
+  //   implicit 
+  //     dropE: DropE[ESI2, ESO]
+  //   , removeAll: RemoveAll.Aux[ESI2, ESO, (ESO, ESII)]
+  //   , merge: Merge.Aux[ESI, ESII, ESIII]
+  //   , dropEI: DropE[ESI, ESIII]
+  //   , rebuildE2: RebuildEO[ESO, ESO2, ESO2]
+  // ): FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESIII, ESO2] = new FlatMappable[ESI, ESO, ESI2, ESO2] {
+  //   type OutESI = ESIII
+  //   type OutESO = ESO2
+
+  //   def downI(esi: ESIII): ESI = dropEI.drop(esi)
+  //   def out2in(esiii: ESIII, eso: ESO): ESI2 = {
+  //     val (esi, esii) = merge.resplit(esiii)
+  //     removeAll.reinsert((eso, esii))
+  //   }
+  //   def buildOut(eso: ESO, eso2: ESO2): ESO2 = rebuildE2.rebuild(eso, eso2)
+  // }
+
 
   // ESI ++ ESI2 && ESO ++ ESO2
   implicit def ESIESOPrepend[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESI3 <: HList, ESO3 <: HList](

@@ -189,14 +189,22 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 */
   it should "simple FileIO" in {
 
-    val eff = effective[Future] { implicit ctx =>
+    type ES = (FileIO<>FileStatus[Read.type])::(StdIO<>Unit)::HNil
+
+    val eff = effective[Future, MkEff[FileIO, Unit] :: MkEff[StdIO, Unit] :: HNil] { implicit ctx =>
       for {
         b <-  FileIO.open[Read.type]("toto.txt")
         _ <-  b match {
-                case true => StdIO.println("Opened")
-                case false => StdIO.println("Can't Open")
+                case true => for {
+                  _ <- StdIO.println("Opened")
+                  k <- FileIO.readLine
+                  _ <- StdIO.println(s"Read $k")
+                } yield ()
+
+                case false => 
+                  StdIO.println("Can't Open").lift[(FileIO<>FileStatus[Read.type])::(StdIO<>Unit)::HNil]
               }
-        _ <-  FileIO.close[Read.type]
+        _ <- FileIO.close[Read.type]
       } yield (())
     }
     val r = eff.run(MkEff[FileIO, Unit](()) :: MkEff[StdIO, Unit](()) :: HNil).futureValue

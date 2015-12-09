@@ -26,20 +26,20 @@ sealed trait Mode
 case object Read extends Mode
 case object Write extends Mode
 
-sealed trait OpenFile[M <: Mode]
-case class FileRead(reader: BufferedReader) extends OpenFile[Read.type]
-case class FileWrite(writer: FileWriter) extends OpenFile[Write.type]
+sealed trait FileHandler[M <: Mode]
+case class FileRead(reader: BufferedReader) extends FileHandler[Read.type]
+case class FileWrite(writer: FileWriter) extends FileHandler[Write.type]
 
-sealed trait ErrorFile
-case object CannotOpen extends ErrorFile
-case object EOF extends ErrorFile
+sealed trait FileError
+case object CannotOpen extends FileError
+case object EOF extends FileError
 
 trait Moder[M <: Mode] {
   def mode: Mode
 
-  def cast[O <: OpenFile[_]](o: OpenFile[M]): O = o.asInstanceOf[O]
+  def cast[O <: FileHandler[_]](o: FileHandler[M]): O = o.asInstanceOf[O]
 
-  def castM[O <: OpenFile[_]](o: O): OpenFile[M] = o.asInstanceOf[OpenFile[M]]
+  def castM[O <: FileHandler[_]](o: O): FileHandler[M] = o.asInstanceOf[FileHandler[M]]
 }
 
 object Moder {
@@ -54,7 +54,7 @@ case class Open[Mo <: Mode](fname: String)(implicit moder: Moder[Mo]) extends Fi
   type ResI = Unit
   type ResO = FileStatus[Mo]
 
-  def handle[M[_], X](res: Unit)(k: Boolean => Xor[ErrorFile, OpenFile[Mo]] => M[X]): M[X] = {
+  def handle[M[_], X](res: Unit)(k: Boolean => Xor[FileError, FileHandler[Mo]] => M[X]): M[X] = {
     val fp = new File(fname)
     moder.mode match {
       case Read  => if(fp.canRead()) {
@@ -153,10 +153,11 @@ object FileIO {
   ): EffM[ctx.M, Unit, MkEff[FileIO, FileStatus[Mo]] :: HNil, MkEff[FileIO, Unit] :: HNil] =
     EffM.call[ctx.M, FileIO, MkEff[FileIO, FileStatus[Mo]] :: HNil](Close[Mo])
 
-//   def readLine[M[_], ES <: HList](
-//     implicit prf: EffElem[FileIO, FileStatus[Read.type], FileStatus[Read.type], ES, ES]
-//   ): EffM[M, Option[String], ES, ES] =
-//     EffM.call[M, FileIO, ES](ReadLine)
+  def readLine0[M[_]]: EffM[M, Option[String], MkEff[FileIO, FileStatus[Read.type]] :: HNil, MkEff[FileIO, FileStatus[Read.type]] :: HNil] =
+    EffM.call[M, FileIO, MkEff[FileIO, FileStatus[Read.type]] :: HNil](ReadLine)
+
+  def readLine(implicit ctx: Ctx): EffM[ctx.M, Option[String], MkEff[FileIO, FileStatus[Read.type]] :: HNil, MkEff[FileIO, FileStatus[Read.type]] :: HNil] =
+    readLine0
 
 //   def writeString[M[_], ES <: HList](s: String)(
 //     implicit prf: EffElem[FileIO, FileStatus[Write.type], FileStatus[Write.type], ES, ES]
