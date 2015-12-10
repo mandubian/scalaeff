@@ -244,7 +244,7 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
         r <-  FileIO[Foo].open[Read.type]("toto.txt")
         w <-  FileIO[Bar].open[Write.type]("tata.txt")
         _ <-  { 
-                // In current verion, we still need to lift all stack to a common local stack
+                // In current verion, we still need to lift all FX branches to a common local stack
                 // to help Scalac in the recursion...
                 type LocalStack = (FileIO@@Foo<>FileStatus[Read.type])::(FileIO@@Bar<>FileStatus[Write.type])::(StdIO<>Unit)::HNil
                 
