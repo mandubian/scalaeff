@@ -159,53 +159,71 @@ object FileIO {
   def readLine(implicit ctx: Ctx): EffM[ctx.M, Option[String], MkEff[FileIO, FileStatus[Read.type]] :: HNil, MkEff[FileIO, FileStatus[Read.type]] :: HNil] =
     readLine0
 
-//   def writeString[M[_], ES <: HList](s: String)(
-//     implicit prf: EffElem[FileIO, FileStatus[Write.type], FileStatus[Write.type], ES, ES]
-//   ): EffM[M, Unit, ES, ES] =
-//     EffM.call[M, FileIO, ES](WriteString(s))
+  def writeString0[M[_]](s: String): EffM[M, Unit, MkEff[FileIO, FileStatus[Write.type]] :: HNil, MkEff[FileIO, FileStatus[Write.type]] :: HNil] =
+    EffM.call[M, FileIO, MkEff[FileIO, FileStatus[Write.type]] :: HNil](WriteString(s))
 
-//   def writeLine[M[_], ES <: HList](s: String)(
-//     implicit prf: EffElem[FileIO, FileStatus[Write.type], FileStatus[Write.type], ES, ES]
-//   ): EffM[M, Unit, ES, ES] = 
-//     writeString(s + "\n")
+  def writeString(s: String)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[FileIO, FileStatus[Write.type]] :: HNil, MkEff[FileIO, FileStatus[Write.type]] :: HNil] =
+    writeString0(s)
 
-//   def isEof[M[_], ES <: HList](
-//     implicit prf: EffElem[FileIO, FileStatus[Read.type], FileStatus[Read.type], ES, ES]
-//   ): EffM[M, Boolean, ES, ES] = 
-//     EffM.call[M, FileIO, ES](IsEOF)
+  def writeLine0[M[_]](s: String): EffM[M, Unit, MkEff[FileIO, FileStatus[Write.type]] :: HNil, MkEff[FileIO, FileStatus[Write.type]] :: HNil] =
+    writeString0(s + "\n")
 
-//   trait Labelled[L] {
-//     def open[M[_], Mo <: Mode, ES <: HList, ESO <: HList](file: String)(
-//       implicit prf: EffElem[FileIO@@L, Unit, FileStatus[Mo], ES, ESO], moder: Moder[Mo]
-//     ): EffM[M, Boolean, ES, ESO] =
-//       EffM.call[M, FileIO@@L, ES](Open[Mo](file))
+  def writeLine(s: String)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[FileIO, FileStatus[Write.type]] :: HNil, MkEff[FileIO, FileStatus[Write.type]] :: HNil] =
+    writeLine0(s)
 
-//     def close[M[_], Mo <: Mode, ES <: HList, ESO <: HList](
-//       implicit prf: EffElem[FileIO@@L, FileStatus[Mo], Unit, ES, ESO], moder: Moder[Mo]
-//     ): EffM[M, Unit, ES, ESO] = EffM.call[M, FileIO@@L, ES](Close[Mo])
+  def isEof0[M[_]]: EffM[M, Boolean, MkEff[FileIO, FileStatus[Read.type]] :: HNil, MkEff[FileIO, FileStatus[Read.type]] :: HNil] = 
+    EffM.call[M, FileIO, MkEff[FileIO, FileStatus[Read.type]] :: HNil](IsEOF)
 
-//     def readLine[M[_], ES <: HList](
-//       implicit prf: EffElem[FileIO@@L, FileStatus[Read.type], FileStatus[Read.type], ES, ES]
-//     ): EffM[M, Option[String], ES, ES] =
-//       EffM.call[M, FileIO@@L, ES](ReadLine)
+  def isEof(implicit ctx: Ctx): EffM[ctx.M, Boolean, MkEff[FileIO, FileStatus[Read.type]] :: HNil, MkEff[FileIO, FileStatus[Read.type]] :: HNil] = 
+    isEof0
 
-//     def writeString[M[_], ES <: HList](s: String)(
-//       implicit prf: EffElem[FileIO@@L, FileStatus[Write.type], FileStatus[Write.type], ES, ES]
-//     ): EffM[M, Unit, ES, ES] =
-//       EffM.call[M, FileIO@@L, ES](WriteString(s))
-  
-//     def writeLine[M[_], ES <: HList](s: String)(
-//       implicit prf: EffElem[FileIO@@L, FileStatus[Write.type], FileStatus[Write.type], ES, ES]
-//     ): EffM[M, Unit, ES, ES] =
-//       writeString(s + "\n")
+  trait Labelled[L] {
+    def open0[M[_], Mo <: Mode](file: String)(
+      implicit moder: Moder[Mo]
+    ): EffM[M, Boolean, MkEff[FileIO@@L, Unit] :: HNil, MkEff[FileIO@@L, FileStatus[Mo]] :: HNil] =
+      EffM.call[M, FileIO@@L, MkEff[FileIO@@L, Unit] :: HNil](Open[Mo](file))
 
-//     def isEof[M[_], ES <: HList](
-//       implicit prf: EffElem[FileIO@@L, FileStatus[Read.type], FileStatus[Read.type], ES, ES]
-//     ): EffM[M, Boolean, ES, ES] = 
-//       EffM.call[M, FileIO@@L, ES](IsEOF)
-//   }
+    def open[Mo <: Mode](file: String)(
+      implicit ctx: Ctx, moder: Moder[Mo]
+    ): EffM[ctx.M, Boolean, MkEff[FileIO@@L, Unit] :: HNil, MkEff[FileIO@@L, FileStatus[Mo]] :: HNil] =
+      open0(file)
 
-//   def apply[L] = new Labelled[L] {}
+    def close0[M[_], Mo <: Mode]()(
+      implicit moder: Moder[Mo]
+    ): EffM[M, Unit, MkEff[FileIO@@L, FileStatus[Mo]] :: HNil, MkEff[FileIO@@L, Unit] :: HNil] =
+      EffM.call[M, FileIO@@L, MkEff[FileIO@@L, FileStatus[Mo]] :: HNil](Close[Mo])
+
+    def close[Mo <: Mode]()(
+      implicit ctx: Ctx, moder: Moder[Mo]
+    ): EffM[ctx.M, Unit, MkEff[FileIO@@L, FileStatus[Mo]] :: HNil, MkEff[FileIO@@L, Unit] :: HNil] =
+      EffM.call[ctx.M, FileIO@@L, MkEff[FileIO@@L, FileStatus[Mo]] :: HNil](Close[Mo])
+
+    def readLine0[M[_]]: EffM[M, Option[String], MkEff[FileIO@@L, FileStatus[Read.type]] :: HNil, MkEff[FileIO@@L, FileStatus[Read.type]] :: HNil] =
+      EffM.call[M, FileIO@@L, MkEff[FileIO@@L, FileStatus[Read.type]] :: HNil](ReadLine)
+
+    def readLine(implicit ctx: Ctx): EffM[ctx.M, Option[String], MkEff[FileIO@@L, FileStatus[Read.type]] :: HNil, MkEff[FileIO@@L, FileStatus[Read.type]] :: HNil] =
+      readLine0
+
+    def writeString0[M[_]](s: String): EffM[M, Unit, MkEff[FileIO@@L, FileStatus[Write.type]] :: HNil, MkEff[FileIO@@L, FileStatus[Write.type]] :: HNil] =
+      EffM.call[M, FileIO@@L, MkEff[FileIO@@L, FileStatus[Write.type]] :: HNil](WriteString(s))
+
+    def writeString(s: String)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[FileIO@@L, FileStatus[Write.type]] :: HNil, MkEff[FileIO@@L, FileStatus[Write.type]] :: HNil] =
+      writeString0(s)
+
+    def writeLine0[M[_]](s: String): EffM[M, Unit, MkEff[FileIO@@L, FileStatus[Write.type]] :: HNil, MkEff[FileIO@@L, FileStatus[Write.type]] :: HNil] =
+      writeString0(s + "\n")
+
+    def writeLine(s: String)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[FileIO@@L, FileStatus[Write.type]] :: HNil, MkEff[FileIO@@L, FileStatus[Write.type]] :: HNil] =
+      writeLine0(s)
+
+    def isEof0[M[_]]: EffM[M, Boolean, MkEff[FileIO@@L, FileStatus[Read.type]] :: HNil, MkEff[FileIO@@L, FileStatus[Read.type]] :: HNil] = 
+      EffM.call[M, FileIO@@L, MkEff[FileIO@@L, FileStatus[Read.type]] :: HNil](IsEOF)
+
+    def isEof(implicit ctx: Ctx): EffM[ctx.M, Boolean, MkEff[FileIO@@L, FileStatus[Read.type]] :: HNil, MkEff[FileIO@@L, FileStatus[Read.type]] :: HNil] = 
+      isEof0
+  }
+
+  def apply[L] = new Labelled[L] {}
 
 
 }

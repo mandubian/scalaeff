@@ -28,7 +28,7 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
   type Foo = Foo.type
   case object Bar extends Label
   type Bar = Bar.type
-/*
+
   "Eff" should "flatMap isoList" in {
     val eff = State[Foo].put0[Future, Int](3).lift[(State@@Foo<>Int) :: (State@@Bar<>String) :: HNil].flatMap { _ => 
       State[Bar].put0[Future, String]("works").lift[(State@@Bar<>String) :: (State@@Foo<>Int) :: HNil]
@@ -186,10 +186,8 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
     // r should equal (s"3works_$s")
     r should equal ("3works")
   }
-*/
-  it should "simple FileIO" in {
 
-    type ES = (FileIO<>FileStatus[Read.type])::(StdIO<>Unit)::HNil
+  it should "FileIO simple" in {
 
     val eff = effective[Future, MkEff[FileIO, Unit] :: MkEff[StdIO, Unit] :: HNil] { implicit ctx =>
       for {
@@ -212,137 +210,87 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
  
   }
 
-  /*it should "FileIO" in {
-    type ES = (FileIO<>Unit) :: (StdIO<>Unit) :: HNil
-    type ES2 = (FileIO<>FileStatus[Read.type]) :: (StdIO<>Unit) :: HNil
+  it should "FileIO write" in {
 
-    val eff = for {
-      b <-  FileIO.open[Future, Read.type, ES, ES2]("toto.txt")
-      _ <-  b match {
-              case true   => 
-                for {
-                  l <-  FileIO.readLine[Future, ES2]
-                  _ <-  l match {
-                          case Some(l) => StdIO.putStrLn[Future, ES2](l)
-                          case None => StdIO.putStrLn[Future, ES2]("")
-                        }
-                  _ <-  FileIO.close[Future, Read.type, ES2, ES]
+    val eff = effective[Future] { implicit ctx =>
+      for {
+        b <-  FileIO.open[Write.type]("tata.txt")
+        _ <-  b match {
+                case true => for {
+                  _ <- StdIO.println("Opened")
+                  _ <- FileIO.writeLine("blabla")
+                  _ <- StdIO.println(s"wrote line")
                 } yield ()
-                
-              case false  => for {
-                _ <- StdIO.putStrLn[Future, ES2]("Can't open file")
-                _ <- FileIO.close[Future, Read.type, ES2, ES]
-              } yield ()
-            }
-    } yield ()
 
+                case false => 
+                  StdIO.println("Can't Open").lift[(FileIO<>FileStatus[Write.type])::(StdIO<>Unit)::HNil]
+              }
+        _ <- FileIO.close[Write.type]
+      } yield (())
+    }
     val r = eff.run(MkEff[FileIO, Unit](()) :: MkEff[StdIO, Unit](()) :: HNil).futureValue
-
     println("Res:"+r)
+ 
   }
 
-  it should "FileIO with labels" in {
-    type ES = (FileIO@@Foo<>Unit) :: (StdIO<>Unit) :: HNil
-    type ES2 = (FileIO@@Foo<>FileStatus[Read.type]) :: (StdIO<>Unit) :: HNil
 
-    val eff = for {
-      b <-  FileIO[Foo].open[Future, Read.type, ES, ES2]("toto.txt")
-      _ <-  b match {
-              case true   => 
-                for {
-                  l <-  FileIO[Foo].readLine[Future, ES2]
-                  _ <-  l match {
-                          case Some(l) => StdIO.putStrLn[Future, ES2](l)
-                          case None => StdIO.putStrLn[Future, ES2]("")
-                        }
-                  _ <-  FileIO[Foo].close[Future, Read.type, ES2, ES]
-                } yield ()
+  it should "FileIO read/write" in {
+
+    // Just 
+    
+
+    val eff = effective[Future] { implicit ctx =>
+      for {
+        r <-  FileIO[Foo].open[Read.type]("toto.txt")
+        w <-  FileIO[Bar].open[Write.type]("tata.txt")
+        _ <-  { 
+                // In current verion, we still need to lift all stack to a common local stack
+                // to help Scalac in the recursion...
+                type LocalStack = (FileIO@@Foo<>FileStatus[Read.type])::(FileIO@@Bar<>FileStatus[Write.type])::(StdIO<>Unit)::HNil
                 
-              case false  => for {
-                _ <- StdIO.putStrLn[Future, ES2]("Can't open file")
-                _ <- FileIO[Foo].close[Future, Read.type, ES2, ES]
-              } yield ()
-            }
-    } yield ()
+                if(r && w) {
+                  def rec: EffM[Future, Unit, LocalStack, LocalStack] = for {
+                    isEof <-  FileIO[Foo].isEof
+                    _     <-  if(!isEof) {
+                                for {
+                                  s <-  FileIO[Foo].readLine
+                                  _ <-  StdIO.print(s"Read $s")
+                                  _ <-  s match {
+                                          case Some(s) =>
+                                            (for {
+                                              _ <- FileIO[Bar].writeLine(s)
+                                              _ <- StdIO.println(s"... Wrote $s")
+                                            } yield ()).lift[LocalStack]
+                                          case None => 
+                                            StdIO.println(s"... Nothing to write").lift[LocalStack]
+                                        }
+                                  _ <- rec
+                                } yield ()
+                              } else {
+                                StdIO.println("EOF").lift[LocalStack]
+                              }
+                  } yield ()
+                  rec
+                } else {
+                  StdIO.println("Can't Open").lift[LocalStack]
+                }
+              }
+        _ <-  FileIO[Foo].close[Read.type]
+        _ <-  FileIO[Bar].close[Write.type]
+      } yield (())
+    }
 
-    val r = eff.run(MkEff[FileIO@@Foo, Unit](()) :: MkEff[StdIO, Unit](()) :: HNil).futureValue
-
-    println("Res:"+r)
-  }
-
-  it should "FileIO read + write" in {
-    type ES =   (FileIO@@Foo<>Unit) ::
-                (FileIO@@Bar<>Unit) ::
-                (StdIO<>Unit) ::
-                (State<>Int) ::
-                HNil
-
-    type ES2 =  (FileIO@@Foo<>FileStatus[Read.type]) ::
-                (FileIO@@Bar<>Unit) ::
-                (StdIO<>Unit) ::
-                (State<>Int) ::
-                HNil
-
-
-    type ES3 =  (FileIO@@Foo<>FileStatus[Read.type]) ::
-                (FileIO@@Bar<>FileStatus[Write.type]) ::
-                (StdIO<>Unit) ::
-                (State<>Int) ::
-                HNil
-
-    val eff = for {
-      r <-  FileIO[Foo].open[Future, Read.type, ES, ES2]("toto.txt")
-      w <-  FileIO[Bar].open[Future, Write.type, ES2, ES3]("tata.txt")
-      _ <-  if(r && w) {
-                def rw: EffM[Future, Unit, ES3, ES3] = for {
-                  isEof <- FileIO[Foo].isEof[Future, ES3]
-                  _ <-  if(!isEof) 
-                          for {
-                            s <-  FileIO[Foo].readLine[Future, ES3]
-                            _ <-  s match {
-                                    case Some(s) => for {
-                                      _ <- FileIO[Bar].writeLine[Future, ES3](s)
-                                      _ <- StdIO.putStrLn[Future, ES3](s"Read/Write $s")
-                                      _ <- State.update[Future, Int, ES3](_ + 1)
-                                    } yield ()
-                                    case None => EffM.pure[Future, ES3, Unit](())
-                                  }
-                            _ <-  rw
-                          } yield ()
-                        else EffM.pure[Future, ES3, Unit](())
-                } yield (())
-
-                rw
-            } else StdIO.putStrLn[Future, ES3](s"Couldn't open one of files $r $w")
-
-      _ <-  FileIO[Bar].close[Future, Write.type, ES3, ES2]
-      _ <-  FileIO[Foo].close[Future, Read.type, ES2, ES]
-      i <-  State.get[Future, Int, ES]
-    } yield (i)
-
+    // Initialize Resources
     val r = eff.run(
-      MkEff[FileIO@@Foo, Unit]() ::
-      MkEff[FileIO@@Bar, Unit]() ::
-      MkEff[StdIO, Unit]() ::
-      MkEff[State, Int](0) ::
-      HNil
-    ).futureValue
-
-    println(s"Read/Write $r lines")
+              MkEff[FileIO@@Foo, Unit](()) ::
+              MkEff[FileIO@@Bar, Unit](()) ::
+              MkEff[StdIO, Unit](()) ::
+              HNil
+            ).futureValue
+    println("Res:"+r)
+ 
   }
 
-  it should "FileIO read + write 2" in {
-    type ES =   (FileIO<>Unit) ::
-                HNil
-
-    type ES2 =  (FileIO<>FileStatus[Read.type]) ::
-                HNil
-
-    val eff: EffM[Future, ] = for {
-      r <-  FileIO.open2[Future, Read.type, ES]("toto.txt")
-      r <-  FileIO.close2[Future, Read.type, ES2]
-    } yield (())
-  }*/
 }
 
     // implicitly[RemoveAll.Aux[
