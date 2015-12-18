@@ -25,6 +25,8 @@ lazy val strictScalac =
     //, "-Ywarn-unused-import"
 )
 
+resolvers += Resolver.sonatypeRepo("releases")
+
 
 lazy val root = project.in(file("."))
   .settings(commonSettings:_*)
@@ -34,6 +36,7 @@ lazy val root = project.in(file("."))
         "com.chuusai"     %%  "shapeless"        % "2.2.5"
       , "org.scalatest"   %%  "scalatest"        % "2.2.1"   % "test"
       , "org.spire-math"  %%  "cats"             % "0.2.0"
+      // , "org.typelevel"   %% "alleycats"         % "0.1.2"
       , "org.typelevel"   %%  "export-hook"      % "1.1.0"
       , "org.scala-lang"  % "scala-reflect"      % scalaVersion.value % "provided"
       , compilerPlugin("org.scalamacros" % "paradise" % "2.1.0-M5" cross CrossVersion.full)

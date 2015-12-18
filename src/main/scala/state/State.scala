@@ -26,104 +26,114 @@ case class Get[A]() extends State {
   type ResI = A
   type ResO = A
 
-  def handle[M[_], X](a: A)(k: A => A => M[X]): M[X] = k(a)(a)
+  // def handle[M[_], X](a: A)(k: A => A => M[X]): M[X] = k(a)(a)
 }
+
+// object Get {
+
+  // implicit def handler[A]: Handler[Get[A], Future] = new Handler[Get[A], Future] {
+  //   def handle[Future[_], A](e: Get[A])(res: A)(k: A => A => Future[A]): Future[A] = k(())(b)
+  // }
+
+// }
 
 case class Put[A, B](b: B) extends State {
   type T = Unit
   type ResI = A
   type ResO = B
 
-  def handle[M[_], X](a: A)(k: Unit => B => M[X]): M[X] = k(())(b)
+  // def handle[M[_], X](a: A)(k: Unit => B => M[X]): M[X] = k(())(b)
 }
 
 object State {
-
+  
   // GET
-  def get0[M[_], A](): EffM[M, A, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil] =
-    EffM.call[M, State, MkEff[State, A] :: HNil](Get[A]())
+  def get0[M[_], A](): EffM[M, A, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil, Handler[Get[A], M] :: HNil] =
+    EffM.call[M, State, Get[A], MkEff[State, A] :: HNil, Handler[Get[A], M] :: HNil](Get[A]())
 
-  def get[A](implicit ctx: Ctx): EffM[ctx.M, A, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil] =
+  def get[A](implicit ctx: Ctx): EffM[ctx.M, A, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil, Handler[Get[A], ctx.M] :: HNil] =
     get0[ctx.M, A]
 
   // PUT
-  def put0[M[_], A](a: A): EffM[M, Unit, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil] =
-    EffM.call[M, State, MkEff[State, A] :: HNil](Put[A, A](a))
+  def put0[M[_], A](a: A): EffM[M, Unit, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil, Handler[Put[A, A], M] :: HNil] =
+    EffM.call[M, State, Put[A, A], MkEff[State, A] :: HNil, Handler[Put[A, A], M] :: HNil](Put[A, A](a))
 
-  def put[A](a: A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil] =
+  def put[A](a: A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil, Handler[Put[A, A], ctx.M] :: HNil] =
     put0[ctx.M, A](a)
 
   // UPDATE
-  def update0[M[_], A](f: A => A): EffM[M, Unit, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil] =
+  def update0[M[_], A](f: A => A): EffM[M, Unit, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil, Handler[Get[A], M] :: Handler[Put[A, A], M] :: HNil] =
     for {
       v <- get0[M, A]
       u <- put0(f(v))
     } yield u
 
-  def update[A](f: A => A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil] =
+
+  def update[A](f: A => A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State, A] :: HNil, MkEff[State, A] :: HNil, Handler[Get[A], ctx.M] :: Handler[Put[A, A], ctx.M] :: HNil] =
     update0[ctx.M, A](f)
 
-  // PUTM
-  def putM0[M[_], A, B](b: B): EffM[M, Unit, MkEff[State, A] :: HNil, MkEff[State, B] :: HNil] =
-    EffM.call[M, State, MkEff[State, A] :: HNil](Put[A, B](b))
 
-  def putM[A, B](b: B)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State, A] :: HNil, MkEff[State, B] :: HNil] =
+  // PUTM
+  def putM0[M[_], A, B](b: B): EffM[M, Unit, MkEff[State, A] :: HNil, MkEff[State, B] :: HNil, Handler[Put[A, B], M] :: HNil] =
+    EffM.call[M, State, Put[A, B], MkEff[State, A] :: HNil, Handler[Put[A, B], M] :: HNil](Put[A, B](b))
+
+  def putM[A, B](b: B)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State, A] :: HNil, MkEff[State, B] :: HNil, Handler[Put[A, B], ctx.M] :: HNil] =
     putM0[ctx.M, A, B](b)
 
   // UPDATEM
-  def updateM0[M[_], A, B](f: A => B): EffM[M, Unit, MkEff[State, A] :: HNil, MkEff[State, B] :: HNil] =
+  def updateM0[M[_], A, B](f: A => B): EffM[M, Unit, MkEff[State, A] :: HNil, MkEff[State, B] :: HNil, Handler[Get[A], M] :: Handler[Put[A, B], M] :: HNil] =
     for {
       v <- get0[M, A]
       u <- putM0[M, A, B](f(v))
     } yield u
 
-  def updateM[A, B](f: A => B)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State, A] :: HNil, MkEff[State, B] :: HNil] =
+  def updateM[A, B](f: A => B)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State, A] :: HNil, MkEff[State, B] :: HNil, Handler[Get[A], ctx.M] :: Handler[Put[A, B], ctx.M] :: HNil] =
     updateM0[ctx.M, A, B](f)
-
 
   def apply[L] = new Labelled[L] {}
 
-
   trait Labelled[L] {
     // GET
-    def get0[M[_], A](): EffM[M, A, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil] =
-      EffM.call[M, State@@L, MkEff[State@@L, A] :: HNil](Get[A]())
+    def get0[M[_], A](): EffM[M, A, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil, Handler[Get[A]@@L, M] :: HNil] =
+      EffM.call[M, State@@L, Get[A]@@L, MkEff[State@@L, A] :: HNil, Handler[Get[A]@@L, M] :: HNil](Get[A]())
 
-    def get[A](implicit ctx: Ctx): EffM[ctx.M, A, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil] =
-      get0[ctx.M, A]()
+    def get[A](implicit ctx: Ctx): EffM[ctx.M, A, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil, Handler[Get[A]@@L, ctx.M] :: HNil] =
+      get0[ctx.M, A]
 
     // PUT
-    def put0[M[_], A](a: A): EffM[M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil] =
-      EffM.call[M, State@@L, MkEff[State@@L, A] :: HNil](Put[A, A](a))
+    def put0[M[_], A](a: A): EffM[M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil, Handler[Put[A, A]@@L, M] :: HNil] =
+      EffM.call[M, State@@L, Put[A, A]@@L, MkEff[State@@L, A] :: HNil, Handler[Put[A, A]@@L, M] :: HNil](Put[A, A](a))
 
-    def put[A](a: A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil] =
+    def put[A](a: A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil, Handler[Put[A, A]@@L, ctx.M] :: HNil] =
       put0[ctx.M, A](a)
 
     // UPDATE
-    def update0[M[_], A](f: A => A): EffM[M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil] =
+    def update0[M[_], A](f: A => A): EffM[M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil, Handler[Get[A]@@L, M] :: Handler[Put[A, A]@@L, M] :: HNil] =
       for {
         v <- get0[M, A]
-        u <- put0[M, A](f(v))
+        u <- put0(f(v))
       } yield u
 
-    def update[A](f: A => A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil] =
+
+    def update[A](f: A => A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, A] :: HNil, Handler[Get[A]@@L, ctx.M] :: Handler[Put[A, A]@@L, ctx.M] :: HNil] =
       update0[ctx.M, A](f)
 
-    // PUTM
-    def putM[A, B](b: B)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, B] :: HNil] =
-      EffM.call[ctx.M, State@@L, MkEff[State@@L, A] :: HNil](Put[A, B](b))
 
-    def putM0[M[_], A, B](b: B): EffM[M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, B] :: HNil] =
-      EffM.call[M, State@@L, MkEff[State@@L, A] :: HNil](Put[A, B](b))
+    // PUTM
+    def putM0[M[_], A, B](b: B): EffM[M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, B] :: HNil, Handler[Put[A, B]@@L, M] :: HNil] =
+      EffM.call[M, State@@L, Put[A, B]@@L, MkEff[State@@L, A] :: HNil, Handler[Put[A, B]@@L, M] :: HNil](Put[A, B](b))
+
+    def putM[A, B](b: B)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, B] :: HNil, Handler[Put[A, B]@@L, ctx.M] :: HNil] =
+      putM0[ctx.M, A, B](b)
 
     // UPDATEM
-    def updateM0[M[_], A, B](f: A => B): EffM[M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, B] :: HNil] =
+    def updateM0[M[_], A, B](f: A => B): EffM[M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, B] :: HNil, Handler[Get[A]@@L, M] :: Handler[Put[A, B]@@L, M] :: HNil] =
       for {
         v <- get0[M, A]
         u <- putM0[M, A, B](f(v))
       } yield u
 
-    def updateM[A, B](f: A => B)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, B] :: HNil] =
+    def updateM[A, B](f: A => B)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[State@@L, A] :: HNil, MkEff[State@@L, B] :: HNil, Handler[Get[A]@@L, ctx.M] :: Handler[Put[A, B]@@L, ctx.M] :: HNil] =
       updateM0[ctx.M, A, B](f)
 
   }

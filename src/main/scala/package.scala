@@ -35,10 +35,10 @@ package object effects extends Effectives {
 
   type <>[E <: Effect, T] = MkEff[E, T]
 
-  implicit def liftEff[M[_], A, ESI <: HList, ESO <: HList, Super <: HList, SuperO <: HList](
-    eff: EffM[M, A, ESI, ESO]
-  )(
-    implicit dropE: DropE[ESI, Super], rebuildEO: RebuildEO[Super, ESO, SuperO]
-  ): EffM[M, A, Super, SuperO] = eff.lift2[Super, SuperO]
+  // implicit def liftEff[M[_], A, ESI <: HList, ESO <: HList, Super <: HList, SuperO <: HList](
+  //   eff: EffM[M, A, ESI, ESO]
+  // )(
+  //   implicit dropE: DropE[ESI, Super], rebuildEO: RebuildEO[Super, ESO, SuperO]
+  // ): EffM[M, A, Super, SuperO] = eff.lift2[Super, SuperO]
 
 }

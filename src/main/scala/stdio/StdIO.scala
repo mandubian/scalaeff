@@ -13,6 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+/*
 package effects
 package stdio
 
@@ -109,4 +110,4 @@ object StdIO {
   def println[A](a: A)(implicit ctx: Ctx): EffM[ctx.M, Unit, MkEff[StdIO, Unit] :: HNil, MkEff[StdIO, Unit] :: HNil] =
     println0(a)
 
-}
+}*/

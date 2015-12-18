@@ -1,34 +1,75 @@
 package effects
 
-import scala.concurrent.Future
-import scala.concurrent.ExecutionContext.Implicits.global
 
 import org.scalatest.concurrent.{AsyncAssertions, PatienceConfiguration, ScalaFutures}
 import org.scalatest.{Assertions, BeforeAndAfterAll, FeatureSpec, FlatSpec, Matchers, Suite}
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.time.{Millis, Seconds, Span => TSpan}
 
-import cats.std.future._
 import cats.data.Xor
 
 import shapeless._
 import ops.hlist._
 
-import file._
+// import file._
 import state._
-import stdio._
+// import stdio._
+
 
 class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 
   implicit val defaultPatience =
     PatienceConfig(timeout =  TSpan(300, Seconds), interval = TSpan(5, Millis))
-
+  
   trait Label
   case object Foo extends Label
   type Foo = Foo.type
   case object Bar extends Label
   type Bar = Bar.type
 
+  "Eff" should "simplest State" in {
+
+    // Define our program with Effects in an abstract context of execution M[_] (very simple for now as I need to port the handler code to other effects)
+    // Please note that M doesn't require anything here
+    def eff[M[_]] = for {
+      k <- State.get0[M, Int]
+      _ <- State.put0[M, Int](k + 2)
+      l <- State.get0[M, Int]
+    } yield (l)
+
+    // Define our Handlers for a given context of execution (dummy Future here)
+    import scala.concurrent.Future
+
+    implicit def handlerGet[A]: Handler.Aux[Get[A], A, A, A, Future] = new Handler[Get[A], Future] {
+      type T = A
+      type ResI = A
+      type ResO = A
+
+      def handle[X](e: Get[A])(a: ResI)(k: T => ResO => Future[X]): Future[X] = k(a)(a)
+    }
+
+    implicit def handlerPut[A, B]: Handler.Aux[Put[A, B], Unit, A, B, Future] = new Handler[Put[A, B], Future] {
+      type T = Unit
+      type ResI = A
+      type ResO = B
+
+      def handle[X](e: Put[A, B])(res: A)(k: Unit => B => Future[X]): Future[X] = k(())(e.b)
+    }
+
+    // Execute program
+    // On execution site, M[_] just requires to be an Applicative to run it
+    // (and in reality a alleycats Pure would be enough, we don't need the Functor)
+    import cats.std.future._
+    import scala.concurrent.ExecutionContext.Implicits.global
+
+    // Run the program
+    // if anything is missing (the State initial resource, the Get/Put handlers for Future),
+    // it won't compile
+    val r = eff.run(MkEff[State, Int](3) :: HNil).futureValue
+
+    r should equal (5)
+  }
+/*  
   "Eff" should "flatMap isoList" in {
     val eff = State[Foo].put0[Future, Int](3).lift[(State@@Foo<>Int) :: (State@@Bar<>String) :: HNil].flatMap { _ => 
       State[Bar].put0[Future, String]("works").lift[(State@@Bar<>String) :: (State@@Foo<>Int) :: HNil]
@@ -290,7 +331,7 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
     println("Res:"+r)
  
   }
-
+*/
 }
 
     // implicitly[RemoveAll.Aux[

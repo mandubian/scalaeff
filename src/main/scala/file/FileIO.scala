@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-package effects
+/*package effects
 package file
 
 import java.io.{File, BufferedReader, FileReader, FileWriter}
@@ -226,5 +226,5 @@ object FileIO {
   def apply[L] = new Labelled[L] {}
 
 
-}
+}*/
 

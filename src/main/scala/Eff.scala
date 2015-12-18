@@ -33,115 +33,112 @@ trait Effect {
   type T
   type ResI
   type ResO
-
-  def handle[M[_], A](res: ResI)(k: T => ResO => M[A]): M[A]
 }
 
+object Effect {
+  type Aux[T0, ResI0, ResO0] = Effect { type T = T0; type ResI = ResI0; type ResO = ResO0 }
+}
+
+trait Handler[E <: Effect, M[_]] {
+  type T
+  type ResI
+  type ResO
+
+  def handle[A](e: E)(res: ResI)(k: T => ResO => M[A]): M[A]
+}
+
+object Handler {
+  type Aux[E <: Effect, T0, ResI0, ResO0, M[_]] = Handler[E, M] { type T = T0; type ResI = ResI0; type ResO = ResO0 }
+}
 
 /** EFFECT reification with a resource */
 trait EffectM
 case class MkEff[E <: Effect, Res](res: Res) extends EffectM
 
-trait Env[M[_], ES0 <: HList] {
-  type ES = ES0
-
-  type Eff[A] = EffM[M, A, ES, ES]
-
-}
-
-object Env {
-  def apply[M[_], ES <: HList] = new Env[M, ES] {}
-}
-
-sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList] {
+sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList, HS <: HList] {
   import EffM._
 
   def run[ESI0 <: HList](es: ESI0)(
-    implicit ap: Applicative[M],
-             iso: IsoList[ESI0, ESI]
-  ): M[A] = eff(iso(es))(a => eso => ap.pure(a))
+    implicit  ap: Applicative[M]
+            , iso: IsoList[ESI0, ESI]
+            , hs: Handlers[M, HS]
+  ): M[A] = eff(hs.handlers)(iso(es))(a => eso => ap.pure(a))
   
-  def runPure(es: ESI)(implicit ev: M[A] =:= A, ap: Applicative[M]): M[(ESO, A)] =
-      eff(es)( a => env => ap.pure((env, a)) )
+  def runPure(es: ESI)(
+    implicit  ev: M[A] =:= A, ap: Applicative[M]
+            , hs: Handlers[M, HS]
+  ): M[(ESO, A)] =
+      eff(hs.handlers)(es)( a => env => ap.pure((env, a)) )
 
-  def eff[B](es: ESI)(ce: A => ESO => M[B]): M[B] = this match {
+  def eff[B](hs: HS)(es: ESI)(ce: A => ESO => M[B]): M[B] = this match {
     case Value(a) => ce(a)(es.asInstanceOf[ESO])
-    case EMap(effP, f) => effP.eff(es)(a => eso => ce(f(a))(eso))
+    case EMap(effP, f) => effP.eff(hs)(es)(a => eso => ce(f(a))(eso))
 
-    case EFlatMap(effP, f, prf) =>
-          effP.eff(prf.downI(es)) { a => eso =>
-            f(a).eff(prf.out2in(es, eso)) { a => eso2 =>
+    case EFlatMap(effP, f, prf, merge) =>
+          val (hs1, hs2) = merge.resplit(hs)
+          effP.eff(hs1)(prf.downI(es)) { a => eso =>
+            f(a).eff(hs2)(prf.out2in(es, eso)) { a => eso2 =>
               ce(a)(prf.buildOut(eso, eso2))
             }
           }
 
-    case EBind(effP, f) => effP.eff(es)(a => eso => f(a).eff(eso)(ce))
-    case l@LiftP(effP, dropE, rebuildEO) => effP.eff(dropE.drop(es))(a => eso => ce(a)(rebuildEO.rebuild(es, eso)))
-    case New(e, effP) => effP.eff(e :: es)(a => eso => ce(a)(eso.tail))
-    case c: CallP[M, t, e, es, eso] => c.execEff(es)(a => eso => ce(a)(eso))
+    // case EBind(effP, f) => effP.eff(es)(a => eso => f(a).eff(eso)(ce))
+    case l@LiftP(effP, dropE, rebuildEO) => effP.eff(hs)(dropE.drop(es))(a => eso => ce(a)(rebuildEO.rebuild(es, eso)))
+    case New(e, h, effP) => effP.eff(h :: hs)(e :: es)(a => eso => ce(a)(eso.tail))
+    case c: CallP[M, t, e, e1, es, eso, hs] => c.execEff(hs)(es)(a => eso => ce(a)(eso))
   }
 
-  def map[B](f: A => B): EffM[M, B, ESI, ESO] = EMap[M, A, B, ESI, ESO](this, f)
+  def map[B](f: A => B): EffM[M, B, ESI, ESO, HS] = EMap[M, A, B, ESI, ESO, HS](this, f)
 
-  // def map[B, ESI2 <: HList, ESO2 <: HList](f: A => B)(
-  //   implicit mappable: Mappable.Aux[ESI, ESO, ESI2, ESO2]
-  // ): EffM[M, B, ESI2, ESO2] = EMap2[M, A, B, ESI, ESO, ESI2, ESO2](this, f, mappable)
+  def flatMap[B, ESI2 <: HList, ESO2 <: HList, ESI3 <: HList, ESO3 <: HList, HS2 <: HList, HS3 <: HList](f: A => EffM[M, B, ESI2, ESO2, HS2])(
+    implicit
+      flatMappable: FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI3, ESO3],
+      merge: Merge.Aux[HS, HS2, HS3]
+  ): EffM[M, B, ESI3, ESO3, HS3] = EFlatMap(this, f, flatMappable, merge)
 
-  // def map[B, Super <: HList, SuperO <: HList](f: A => B)(
+  // def lift2[Super <: HList, SuperO <: HList](
   //   implicit dropE: DropE[ESI, Super], rebuildEO: RebuildEO[Super, ESO, SuperO]
-  // ): EffM[M, B, Super, SuperO] = EMap[M, A, B, ESI, ESO](this, f).lift[Super, SuperO]
-
-  // def flatMap[B, ESO2 <: HList](f: A => EffM[M, B, ESO, ESO2]): EffM[M, B, ESI, ESO2] = EBind[M, A, B, ESI, ESO, ESO2](this, f)
-
-  // def flatMap[B, ESO2 <: HList, Super <: HList, SuperO <: HList](f: A => EffM[M, B, ESO, ESO2])(
-  //   implicit dropE: DropE[ESI, Super], rebuildEO: RebuildEO[Super, ESO2, SuperO]
-  // ): EffM[M, B, Super, SuperO] = EBind[M, A, B, ESI, ESO, ESO2](this, f).lift2[Super, SuperO]
-
-  def flatMap[B, ESI2 <: HList, ESO2 <: HList, ESI3 <: HList, ESO3 <: HList](f: A => EffM[M, B, ESI2, ESO2])(
-    implicit flatMappable: FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI3, ESO3]
-  ): EffM[M, B, ESI3, ESO3] = EFlatMap(this, f, flatMappable)
-
-  def lift2[Super <: HList, SuperO <: HList](
-    implicit dropE: DropE[ESI, Super], rebuildEO: RebuildEO[Super, ESO, SuperO]
-  ): EffM[M, A, Super, SuperO] =
-    LiftP[M, A, ESI, ESO, Super, SuperO](this, dropE, rebuildEO)
+  // ): EffM[M, A, Super, SuperO] =
+  //   LiftP[M, A, ESI, ESO, Super, SuperO](this, dropE, rebuildEO)
 
   def lift[Super <: HList](
     implicit dropE: DropE[ESI, Super], rebuildEO: RebuildEO[Super, ESO, Super]
-  ): EffM[M, A, Super, Super] =
-    LiftP[M, A, ESI, ESO, Super, Super](this, dropE, rebuildEO)
+  ): EffM[M, A, Super, Super, HS] =
+    LiftP[M, A, ESI, ESO, Super, Super, HS](this, dropE, rebuildEO)
 
 }
 
 
 object EffM {
-  case class Value[M[_], ES <: HList, A](a: A) extends EffM[M, A, ES, ES] {
+  case class Value[M[_], ES <: HList, HS <: HList, A](a: A) extends EffM[M, A, ES, ES, HS] {
     type T = A
   }
  
-  case class New[M[_], A, R, E <: Effect, ES <: HList, ESO <: HList](
-    e: MkEff[E, R], effP: EffM[M, A, MkEff[E, R] :: ES, MkEff[E, R] :: ESO]
-  ) extends EffM[M, A, ES, ESO] {}
+  case class New[M[_], A, R, E <: Effect, ES <: HList, ESO <: HList, HS <: HList](
+    e: MkEff[E, R], handler: Handler[E, M], effP: EffM[M, A, MkEff[E, R] :: ES, MkEff[E, R] :: ESO, Handler[E, M] :: HS]
+  ) extends EffM[M, A, ES, ESO, HS] {}
 
-  case class LiftP[M[_], A, ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList](
-      effP: EffM[M, A, ESI, ESO]
+  case class LiftP[M[_], A, ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, HS <: HList](
+      effP: EffM[M, A, ESI, ESO, HS]
     , dropE: DropE[ESI, ESI2]
     , rebuildEO: RebuildEO[ESI2, ESO, ESO2]
-  ) extends EffM[M, A, ESI2, ESO2] {
+  ) extends EffM[M, A, ESI2, ESO2, HS] {
     type _Sub = ESI
     type _SubO = ESO
   }
 
-  abstract class CallP[M[_], T, E <: Effect, ES <: HList, ESO <: HList](
-    val eff: E
-  ) extends EffM[M, T, ES, ESO] {
+  abstract class CallP[M[_], T, E <: Effect, E1 <: E, ES <: HList, ESO <: HList, HS <: HList](
+    val eff: E1
+  ) extends EffM[M, T, ES, ESO, HS] {
 
-    val prf: EffElem.Aux[E, eff.ResI, eff.ResO, ES, ESO]
+    def prf: EffElem.Aux[E, eff.ResI, eff.ResO, ES, ESO]
+    def hdprf: HandlerElem[M, E1, HS]
 
-    def execEff[B](es: ES)(ce: T => ESO => M[B]): M[B] = {
+    def execEff[B](hs: HS)(es: ES)(ce: T => ESO => M[B]): M[B] = {
       val m: MkEff[E, eff.ResI] = prf.sel(es)
+      val handler: Handler.Aux[E1, eff.T, eff.ResI, eff.ResO, M] = hdprf.sel(hs).asInstanceOf[Handler.Aux[E1, eff.T, eff.ResI, eff.ResO, M]]
       val res: eff.ResI = m.res
-      eff.handle(res) { (a:eff.T) => (resO: eff.ResO) =>
+      handler.handle(eff)(res) { (a:eff.T) => (resO: eff.ResO) =>
         val eso = prf.rep(es, MkEff[E, eff.ResO](resO))
         ce(a.asInstanceOf[T])(eso)
       }
@@ -149,71 +146,61 @@ object EffM {
 
   }
 
-  case class EFlatMap[M[_], A, B, ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESI3 <: HList, ESO3 <: HList](
-    effP: EffM[M, A, ESI, ESO]
-  , f: A => EffM[M, B, ESI2, ESO2]
+  case class EFlatMap[
+    M[_], A, B,
+    ESI <: HList, ESO <: HList,
+    ESI2 <: HList, ESO2 <: HList,
+    ESI3 <: HList, ESO3 <: HList,
+    HS <: HList, HS2 <: HList, HS3 <: HList
+  ](
+    effP: EffM[M, A, ESI, ESO, HS]
+  , f: A => EffM[M, B, ESI2, ESO2, HS2]
   , prf: FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI3, ESO3]
-  ) extends EffM[M, B, ESI3, ESO3]
+  , merge: Merge.Aux[HS, HS2, HS3]
+  ) extends EffM[M, B, ESI3, ESO3, HS3]
 
-  case class EBind[M[_], A, B, ES <: HList, ESO <: HList, ESO2 <: HList](
-    effP: EffM[M, A, ES, ESO], f: A => EffM[M, B, ESO, ESO2]
-  ) extends EffM[M, B, ES, ESO2] {
-    type _ESO = ESO
-  }
-
-  case class EMap[M[_], A, B, ES <: HList, ESO <: HList](
-    effP: EffM[M, A, ES, ESO], f: A => B
-  ) extends EffM[M, B, ES, ESO]
-
-  def pure[M[_], ES <: HList, A](a: A): EffM[M, A, ES, ES] = Value(a)
-
-  // def callO[M[_], E <: Effect, ES <: HList, ESO0 <: HList](_eff: E)(
-  //   implicit effElem: EffElemO[E, _eff.ResI, _eff.ResO, ES, ESO0]
-  // ): EffM[M, _eff.T, ES, ESO0] = new CallP[M, _eff.T, E, ES, ESO0](_eff) {
-  //   val prf = new EffElem[E, _eff.ResI, _eff.ResO, ES] {
-  //     type ESO = ESO0
-  //     def sel(es: ES): MkEff[E, eff.ResI] = effElem.sel(es).asInstanceOf[MkEff[E, eff.ResI]]
-  //     def rep(es: ES, r: MkEff[E, eff.ResO]): ESO0 = ??? //effElem.rep(es, r.asInstanceOf[MkEff[E, _eff.ResO]])
-  //   }
-  //   // effElem.asInstanceOf[EffElemO[E, eff.ResI, eff.ResO, ES, ESO]] // WHY IS IT NEEDED SCALAC????
+  // case class EBind[M[_], A, B, ES <: HList, ESO <: HList, ESO2 <: HList](
+  //   effP: EffM[M, A, ES, ESO], f: A => EffM[M, B, ESO, ESO2]
+  // ) extends EffM[M, B, ES, ESO2] {
+  //   type _ESO = ESO
   // }
 
-  def call[M[_], E <: Effect, ES <: HList](_eff: E)(
-    implicit effElem: EffElem[E, _eff.ResI, _eff.ResO, ES]
-  ): EffM[M, _eff.T, ES, effElem.ESO] = {
-    new CallP[M, _eff.T, E, ES, effElem.ESO](_eff) {
+  case class EMap[M[_], A, B, ES <: HList, ESO <: HList, HS <: HList](
+    effP: EffM[M, A, ES, ESO, HS], f: A => B
+  ) extends EffM[M, B, ES, ESO, HS]
+
+  def pure[M[_], ES <: HList, A](a: A): EffM[M, A, ES, ES, HNil] = Value(a)
+
+  def call[M[_], E <: Effect, E1 <: E, ES <: HList, HS <: HList](_eff: E1)(
+    implicit 
+      effElem: EffElem[E, _eff.ResI, _eff.ResO, ES],
+      handlerElem: HandlerElem[M, E1, HS]
+  ): EffM[M, _eff.T, ES, effElem.ESO, HS] = {
+    new CallP[M, _eff.T, E, E1, ES, effElem.ESO, HS](_eff) {
       val prf = effElem.asInstanceOf[EffElem.Aux[E, eff.ResI, eff.ResO, ES, effElem.ESO]]
-      // new EffElem[E, eff.ResI, eff.ResO, ES] {
-      //   def sel(es: ES): MkEff[E, eff.ResI] = effElem.sel(es).asInstanceOf[MkEff[E, eff.ResI]]
-      //   def rep(es: ES, r: MkEff[E, eff.ResO]): effElem.ESO = effElem.rep(es, r.asInstanceOf[MkEff[E, _eff.ResO]])
-      // }
+
+      val hdprf = handlerElem
     }
   }
 
-  def callM[E <: Effect, ES <: HList](_eff: E)(
-    implicit
-      ctx: Ctx
-    , effElem: EffElem[E, _eff.ResI, _eff.ResO, ES]
-  ): EffM[ctx.M, _eff.T, ES, effElem.ESO] = {
-    new CallP[ctx.M, _eff.T, E, ES, effElem.ESO](_eff) {
-      val prf = effElem.asInstanceOf[EffElem.Aux[E, eff.ResI, eff.ResO, ES, effElem.ESO]]
-      // new EffElem[E, eff.ResI, eff.ResO, ES] {
-      //   def sel(es: ES): MkEff[E, eff.ResI] = effElem.sel(es).asInstanceOf[MkEff[E, eff.ResI]]
-      //   def rep(es: ES, r: MkEff[E, eff.ResO]): effElem.ESO = effElem.rep(es, r.asInstanceOf[MkEff[E, _eff.ResO]])
-      // }
-    }
-  }
+  // def callM[E <: Effect, E1 <: E, ES <: HList, M[_]](_eff: E1)(
+  //   implicit
+  //     ctx: Ctx.Aux[M]
+  //   , effElem: EffElem[E, _eff.ResI, _eff.ResO, ES]
+  // ): EffM[M, _eff.T, ES, effElem.ESO] = {
+  //   new CallP[M, _eff.T, E, E1, ES, effElem.ESO](_eff) {
+  //     val prf = effElem.asInstanceOf[EffElem.Aux[E, eff.ResI, eff.ResO, ES, effElem.ESO]]
+  //     val handler = handler0
+  //   }
+  // }
 
 
-  def lift[M[_], A, E <: Effect, ES <: HList, ESO <: HList, Super <: HList, SuperO <: HList](eff: EffM[M, A, ES, ESO])(
+  def lift[M[_], A, E <: Effect, ES <: HList, ESO <: HList, Super <: HList, SuperO <: HList, HS <: HList](
+    eff: EffM[M, A, ES, ESO, HS]
+  )(
     implicit dropE: DropE[ES, Super], rebuildEO: RebuildEO[Super, ESO, SuperO]
-  ): EffM[M, A, Super, SuperO] =
-    LiftP[M, A, ES, ESO, Super, SuperO](eff, dropE, rebuildEO)
-
-  // def liftI[M[_], A, E <: Effect, ES <: HList, ESO <: HList, Super <: HList, SuperO <: HList](eff: EffM[M, A, ES, ESO])(
-  //   implicit dropE: DropE[ES, Super], rebuildE: RebuildE[SuperO, ES, Super]
-  // ): EffM[M, A, Super, ESO] =
-  //   LiftP[M, A, Super, ES, ESO](eff, dropE, rebuildE)
+  ): EffM[M, A, Super, SuperO, HS] =
+    LiftP[M, A, ES, ESO, Super, SuperO, HS](eff, dropE, rebuildEO)
 
 }
 
@@ -259,6 +246,22 @@ object EffElem {
       def rep(es: ES, r: MkEff[E, ResO]): ESO0 = upd0.value(es, r)
     }
 
+}
+
+
+trait HandlerElem[M[_], E <: Effect, HS <: HList] {
+  def sel(hs: HS): Handler[E, M]
+}
+
+object HandlerElem {
+
+  implicit def mkHandlerElem[M[_], E <: Effect, HS <: HList]
+    (implicit
+      sel0: Lazy[Selector[HS, Handler[E, M]]]
+    ): HandlerElem[M, E, HS] =
+    new HandlerElem[M, E, HS] {
+      def sel(hs: HS): Handler[E, M] = sel0.value(hs)
+    } 
 }
 
 trait Rep[L <: HList, U, V] {
@@ -338,27 +341,6 @@ trait FlatMappable2 extends FlatMappable3 {
     def buildOut(eso: ESO, eso2: ESO2): ESO2 = rebuildE2.rebuild(eso, eso2)
   }
 
-
-
-
-// FileIO<>FileStatus
-// StdIO :: FileIO<>FileStatus
-
-  // ESO == ESI2 with different output type
-  // implicit def three[E <: Effect, H, H2, ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESO1 <: HList](
-  //   implicit
-  //     selESO: Selector[ESO, MkEff[E, H]],
-  //     remove: Remove.Aux[ESO, MkEff[E, H], (MkEff[E, H], ESO1)],
-  //     iso: IsoList[ESO1, ESI2]
-  // ): FlatMappable.Aux[ESI, ESO, MkEff[E, H2] :: ESI2, ESO2, ESI, ESO2] = new FlatMappable[ESI, ESO, MkEff[E, H2] :: ESI2, ESO2] {
-  //   type OutESI = ESI
-  //   type OutESO = ESO2
-
-  //   def downI(esi: ESI): ESI = esi
-  //   def upO(esi: ESI, eso: ESO): MkEff[E, H2] :: ESI2 = iso(sel(eso)._2)
-  //   def upO2(eso: ESO, eso2: ESO2): ESO2 = eso2
-  // }
-
 }
 
 trait FlatMappable3 {
@@ -384,27 +366,6 @@ trait FlatMappable3 {
     }
     def buildOut(eso: ESO, eso2: ESO2): ESO2 = rebuildE2.rebuild(eso, eso2)
   }
-
-  // ESO >> ESI2 but different type
-  // implicit def ESOBiggerThanESI2Different[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESII <: HList, ESIII <: HList](
-  //   implicit 
-  //     dropE: DropE[ESI2, ESO]
-  //   , removeAll: RemoveAll.Aux[ESI2, ESO, (ESO, ESII)]
-  //   , merge: Merge.Aux[ESI, ESII, ESIII]
-  //   , dropEI: DropE[ESI, ESIII]
-  //   , rebuildE2: RebuildEO[ESO, ESO2, ESO2]
-  // ): FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESIII, ESO2] = new FlatMappable[ESI, ESO, ESI2, ESO2] {
-  //   type OutESI = ESIII
-  //   type OutESO = ESO2
-
-  //   def downI(esi: ESIII): ESI = dropEI.drop(esi)
-  //   def out2in(esiii: ESIII, eso: ESO): ESI2 = {
-  //     val (esi, esii) = merge.resplit(esiii)
-  //     removeAll.reinsert((eso, esii))
-  //   }
-  //   def buildOut(eso: ESO, eso2: ESO2): ESO2 = rebuildE2.rebuild(eso, eso2)
-  // }
-
 
   // ESI ++ ESI2 && ESO ++ ESO2
   implicit def ESIESOPrepend[ESI <: HList, ESO <: HList, ESI2 <: HList, ESO2 <: HList, ESI3 <: HList, ESO3 <: HList](
@@ -657,51 +618,26 @@ trait Merge2 {
   }
 }
 
+trait Handlers[M[_], HS <: HList] {
+  val handlers: HS
+}
 
-// trait RebuildE[Ref <: HList, Small <: HList, Big <: HList] {
-//   def rebuild(es1: Ref, es2: Big): Ref
-// }
+object Handlers {
 
+  implicit def nil[M[_]]: Handlers[M, HNil] = new Handlers[M, HNil] {
+    val handlers = HNil
+  }
 
+  implicit def head[M[_], E <: Effect, HS <: HList](
+    implicit
+        handler: Handler[E, M]
+      , next: Handlers[M, HS]
+    ): Handlers[M, Handler[E, M] :: HS] =
+    new Handlers[M, Handler[E, M] :: HS] {
+      val handlers = handler :: next.handlers
+    }
 
-// object RebuildE extends RebuildE2 {
-
-//   implicit object nil extends RebuildE[HNil, HNil, HNil] {
-//     def rebuild(es1: HNil, es2: HNil): HNil = HNil
-//   }
-
-// }
-
-// trait RebuildE2 extends RebuildE3 {
-
-//   implicit def rightNil[H, XS <: HList] = new RebuildE[H :: XS, HNil, HNil] {
-//     def rebuild(es1: H :: XS, es2: HNil): H :: XS = es1
-//   }
-
-// }
-
-// trait RebuildE3 extends RebuildE4 {
-
-//   implicit def leftNil[XH, XS <: HList] = new RebuildE[HNil, XH :: XS, XH :: XS] {
-//     def rebuild(es1: HNil, es2: XH :: XS): HNil = es1
-//   }
-
-//   implicit def keepLeft[XH, XS <: HList, YH, YS <: HList](implicit sub: RebuildE[YS, XS, XS]) =
-//     new RebuildE[YH :: YS , XH :: XS , XH :: XS] {
-//       def rebuild(es1: YH :: YS, es2: XH :: XS): YH :: YS = es1.head :: sub.rebuild(es1.tail, es2.tail)
-//     }
-
-// }
-
-// trait RebuildE4 {
-
-//   implicit def dropRight[XH, XS <: HList, YS <: HList](implicit sub: RebuildE[YS, XS, XS]) =
-//     new RebuildE[YS, XH :: XS, XH :: XS] {
-//       def rebuild(es1: YS, es2: XH :: XS): YS = sub.rebuild(es1, es2.tail)
-//     }
-
-// }
-
+}
 
 trait Ctx {
   type M[_]
@@ -722,14 +658,8 @@ trait Effectful[M0[_], ESI0 <: HList, ESO0 <: HList] {
   type ESI = ESI0
   type ESO = ESO0
 
-  type Eff[A] = EffM[M0, A, ESI0, ESO0]
+  // type Eff[A] = EffM[M0, A, ESI0, ESO0]
 
-  // implicit val hasESI = new HasESI { type ESI = ESI0 }
-  // implicit val hasESO = new HasESO { type ESO = ESI0 }
-
-  // def apply[A](ctx: Ctx): EffM[ctx.M, A, ESI, ESO]
-
-  // def run[M0[_]]() = apply(new Ctx { type M[a] = M0[a] })
 }
 
 object Effectful {

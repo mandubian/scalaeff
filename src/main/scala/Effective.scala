@@ -6,7 +6,7 @@ trait Effective0[M0[_]] {
 
   implicit val ctx: Ctx.Aux[M0] = new Ctx { type M[a] = M0[a] }
   
-  def apply[A, ESI <: HList, ESO <: HList](f: Ctx.Aux[M0] => EffM[M0, A, ESI, ESO]): EffM[M0, A, ESI, ESO] = f(ctx)
+  def apply[A, ESI <: HList, ESO <: HList, HS <: HList](f: Ctx.Aux[M0] => EffM[M0, A, ESI, ESO, HS]): EffM[M0, A, ESI, ESO, HS] = f(ctx)
 
 }
 
@@ -15,9 +15,9 @@ trait Effective[M0[_], ES <: HList] {
 
   implicit val ctx: Ctx.Aux[M0] = new Ctx { type M[a] = M0[a] }
   
-  def apply[A, ESI <: HList, ESO <: HList](f: Ctx.Aux[M0] => EffM[M0, A, ESI, ESO])(
+  def apply[A, ESI <: HList, ESO <: HList, HS <: HList](f: Ctx.Aux[M0] => EffM[M0, A, ESI, ESO, HS])(
     implicit iso: IsoList[ESI, ES]
-  ): EffM[M0, A, ESI, ESO] = f(ctx)
+  ): EffM[M0, A, ESI, ESO, HS] = f(ctx)
 
 }
 
