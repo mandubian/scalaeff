@@ -39,6 +39,16 @@ object Effect {
   type Aux[T0, ResI0, ResO0] = Effect { type T = T0; type ResI = ResI0; type ResO = ResO0 }
 }
 
+trait EffectBuilder[E <: Effect] {
+
+  val Res = new MkEffBuilder {}
+
+  trait MkEffBuilder {
+    def apply[Res](res: Res): MkEff[E, Res] = MkEff(res)
+  }
+
+}
+
 trait Handler[E <: Effect, M[_]] {
   type T
   type ResI
@@ -53,7 +63,9 @@ object Handler {
 
 /** EFFECT reification with a resource */
 trait EffectM
-case class MkEff[E <: Effect, Res](res: Res) extends EffectM
+case class MkEff[E <: Effect, Res](res: Res) extends EffectM {
+  def -:[Lbl](lbl: Lbl): MkEff[E, Res @@ Lbl] = MkEff[E, Res @@ Lbl](res)
+}
 
 sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList, HS <: HList] {
   import EffM._
@@ -71,7 +83,9 @@ sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList, HS <: HList] {
       eff(hs.handlers)(es)( a => env => ap.pure((env, a)) )
 
   def eff[B](hs: HS)(es: ESI)(ce: A => ESO => M[B]): M[B] = this match {
+
     case Value(a) => ce(a)(es.asInstanceOf[ESO])
+
     case EMap(effP, f) => effP.eff(hs)(es)(a => eso => ce(f(a))(eso))
 
     case EFlatMap(effP, f, prf, merge) =>
@@ -82,10 +96,19 @@ sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList, HS <: HList] {
             }
           }
 
-    // case EBind(effP, f) => effP.eff(es)(a => eso => f(a).eff(eso)(ce))
     case l@LiftP(effP, dropE, rebuildEO) => effP.eff(hs)(dropE.drop(es))(a => eso => ce(a)(rebuildEO.rebuild(es, eso)))
+    
     case New(e, h, effP) => effP.eff(h :: hs)(e :: es)(a => eso => ce(a)(eso.tail))
-    case c: CallP[M, t, e, e1, es, eso, hs] => c.execEff(hs)(es)(a => eso => ce(a)(eso))
+    
+    case c: CallP[M, t, e, e1, ESI, eso, hs] => c.execEff(hs)(es)(a => eso => ce(a)(eso))
+
+    case lbl: Labelled[M, t, e, resi, eso, HS, ESO, lbl] =>
+          val esil = lbl.prf.unlabelI(es.asInstanceOf[MkEff[e, resi @@ lbl] :: HNil])
+          
+          lbl.effM.eff(hs)(esil) { a => eso =>
+            val esol = lbl.prf.labelO(eso)
+            ce(a)(esol.asInstanceOf[ESO])
+          }
   }
 
   def map[B](f: A => B): EffM[M, B, ESI, ESO, HS] = EMap[M, A, B, ESI, ESO, HS](this, f)
@@ -110,6 +133,7 @@ sealed trait EffM[M[_], A, ESI <: HList, ESO <: HList, HS <: HList] {
 
 
 object EffM {
+
   case class Value[M[_], ES <: HList, HS <: HList, A](a: A) extends EffM[M, A, ES, ES, HS] {
     type T = A
   }
@@ -146,6 +170,18 @@ object EffM {
 
   }
 
+  abstract class Labelled[
+    M[_], A, E <: Effect, ResI,
+    ESO <: HList, HS <: HList,
+    ESOL <: HList, Lbl
+  ](
+    val lbl: Lbl, val effM: EffM[M, A, MkEff[E, ResI] :: HNil, ESO, HS]
+  ) extends EffM[M, A, MkEff[E, ResI @@ Lbl] :: HNil, ESOL, HS] {
+
+    def prf: EffLabel.Aux[E, ResI, ESO, ESOL, Lbl]
+
+  }
+
   case class EFlatMap[
     M[_], A, B,
     ESI <: HList, ESO <: HList,
@@ -158,12 +194,6 @@ object EffM {
   , prf: FlatMappable.Aux[ESI, ESO, ESI2, ESO2, ESI3, ESO3]
   , merge: Merge.Aux[HS, HS2, HS3]
   ) extends EffM[M, B, ESI3, ESO3, HS3]
-
-  // case class EBind[M[_], A, B, ES <: HList, ESO <: HList, ESO2 <: HList](
-  //   effP: EffM[M, A, ES, ESO], f: A => EffM[M, B, ESO, ESO2]
-  // ) extends EffM[M, B, ES, ESO2] {
-  //   type _ESO = ESO
-  // }
 
   case class EMap[M[_], A, B, ES <: HList, ESO <: HList, HS <: HList](
     effP: EffM[M, A, ES, ESO, HS], f: A => B
@@ -194,7 +224,6 @@ object EffM {
   //   }
   // }
 
-
   def lift[M[_], A, E <: Effect, ES <: HList, ESO <: HList, Super <: HList, SuperO <: HList, HS <: HList](
     eff: EffM[M, A, ES, ESO, HS]
   )(
@@ -202,28 +231,20 @@ object EffM {
   ): EffM[M, A, Super, SuperO, HS] =
     LiftP[M, A, ES, ESO, Super, SuperO, HS](eff, dropE, rebuildEO)
 
-}
-
-
-trait EffElemO[E <: Effect, Res, ResO, ES <: HList, ESO <: HList] {
-  def sel(es: ES): MkEff[E, Res]
-  def rep(es: ES, r: MkEff[E, ResO]): ESO
-}
-
-object EffElemO {
-
-  implicit def mkEffElem[E <: Effect, Res, ResO, ES <: HList, ESO <: HList]
-    (implicit
-      sel0: Lazy[Selector[ES, MkEff[E, Res]]]
-    , upd0: Lazy[Rep.Aux[ES, MkEff[E, Res], MkEff[E, ResO], ESO]]
-    ) =
-    new EffElemO[E, Res, ResO, ES, ESO] {
-      //(sel, upd)
-      def sel(es: ES): MkEff[E, Res] = sel0.value(es)
-      def rep(es: ES, r: MkEff[E, ResO]): ESO = upd0.value(es, r)
-    }
+  def label[Lbl, M[_], A, E <: Effect, T, ResI, ESO <: HList, ESOL <: HList, HS <: HList]
+    (lbl: Lbl)(eff: EffM[M, A, MkEff[E, ResI] :: HNil, ESO, HS])(
+      implicit effLabel: EffLabel.Aux[E, ResI, ESO, ESOL, Lbl]
+    ): EffM[M, A, MkEff[E, ResI @@ Lbl] :: HNil, ESOL, HS] =
+      new Labelled[
+        M, A, E, ResI,
+        ESO, HS,
+        ESOL, Lbl
+      ](lbl, eff) {
+        val prf = effLabel
+      }
 
 }
+
 
 trait EffElem[E <: Effect, Res, ResO, ES <: HList] {
   type ESO <: HList
@@ -248,6 +269,62 @@ object EffElem {
 
 }
 
+trait ESLabel[ES <: HList, Lbl] {
+  type ESLbl <: HList
+
+  def label(es: ES): ESLbl
+}
+
+object ESLabel {
+
+  type Aux[ES <: HList, Lbl, ESLbl0 <: HList] = ESLabel[ES, Lbl] { type ESLbl = ESLbl0 }
+
+  implicit def hnil[Lbl]: ESLabel.Aux[HNil, Lbl, HNil] = new ESLabel[HNil, Lbl] {
+    type ESLbl = HNil
+
+    def label(es: HNil): HNil = HNil
+  }
+
+  implicit def next[E <: Effect, Res, Lbl, ES <: HList, ES1 <: HList](
+    implicit rec: ESLabel.Aux[ES, Lbl, ES1]
+  ): ESLabel.Aux[MkEff[E, Res] :: ES, Lbl, MkEff[E, Res @@ Lbl] :: ES1] = new ESLabel[MkEff[E, Res] :: ES, Lbl] {
+    type ESLbl = MkEff[E, Res @@ Lbl] :: ES1
+
+    def label(es: MkEff[E, Res] :: ES): MkEff[E, Res @@ Lbl] :: ES1 = {
+      val MkEff(res) = es.head
+      MkEff[E, Res @@ Lbl](res) :: rec.label(es.tail)
+    }
+  }
+}
+
+trait EffLabel[E <: Effect, Res, ESO <: HList, Lbl] {
+  type ESOL <: HList
+
+  def unlabelI(esil: MkEff[E, Res @@ Lbl] :: HNil): MkEff[E, Res] :: HNil
+  def labelO(eso: ESO): ESOL
+}
+
+object EffLabel {
+  type Aux[E <: Effect, Res, ESO <: HList, ESOL0 <: HList, Lbl] =
+    EffLabel[E, Res, ESO, Lbl] {
+      type ESOL = ESOL0
+    }
+
+  implicit def mkEffLabel[E <: Effect, Res, ESO <: HList, ESOL0 <: HList, Lbl](
+    implicit
+      // sel: Selector[ESIL0, MkEff[E, Res @@ Lbl]],
+      esLabel: ESLabel.Aux[ESO, Lbl, ESOL0]
+  ): EffLabel.Aux[E, Res, ESO, ESOL0, Lbl] = new EffLabel[E, Res, ESO, Lbl] {
+    type ESOL = ESOL0
+
+    def unlabelI(esil: MkEff[E, Res @@ Lbl] :: HNil): MkEff[E, Res] :: HNil = {
+      val mkEffResLbl = esil.head
+      mkEffResLbl.asInstanceOf[MkEff[E, Res]] :: HNil
+    }
+
+    def labelO(eso: ESO): ESOL0 = esLabel.label(eso)
+  }
+}
 
 trait HandlerElem[M[_], E <: Effect, HS <: HList] {
   def sel(hs: HS): Handler[E, M]

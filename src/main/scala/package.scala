@@ -33,7 +33,15 @@ package object effects extends Effectives {
 
   implicit def toTag[T, U](t: T): T @@ U = t.asInstanceOf[T @@ U]
 
-  type <>[E <: Effect, T] = MkEff[E, T]
+  type -:[E <: Effect, R] = MkEff[E, R]
+  type @:[I, L] = I @@ L
+  // type <>[E <: Effect, T] = MkEff[E, T]
+
+  implicit class labellize[M[_], A, E <: Effect, ResI, ESO <: HList, HS <: HList](
+    val eff: EffM[M, A, MkEff[E, ResI] :: HNil, ESO, HS]
+  ) extends AnyVal {
+    def -:[Lbl, ESOL <: HList](lbl: Lbl)(implicit effLabel: EffLabel.Aux[E, ResI, ESO, ESOL, Lbl]) = EffM.label(lbl)(eff)
+  }
 
   // implicit def liftEff[M[_], A, ESI <: HList, ESO <: HList, Super <: HList, SuperO <: HList](
   //   eff: EffM[M, A, ESI, ESO]

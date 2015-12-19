@@ -13,19 +13,70 @@ import ops.hlist._
 
 // import file._
 import state._
-// import stdio._
+import stdio._
 
+object Implicits {
+  import scala.concurrent.Future
+
+  implicit def handlerGet[A]: Handler.Aux[Get[A], A, A, A, Future] = new Handler[Get[A], Future] {
+    type T = A
+    type ResI = A
+    type ResO = A
+
+    def handle[X](e: Get[A])(a: ResI)(k: T => ResO => Future[X]): Future[X] = k(a)(a)
+  }
+
+  implicit def handlerPut[A, B]: Handler.Aux[Put[A, B], Unit, A, B, Future] = new Handler[Put[A, B], Future] {
+    type T = Unit
+    type ResI = A
+    type ResO = B
+
+    def handle[X](e: Put[A, B])(res: A)(k: Unit => B => Future[X]): Future[X] = k(())(e.b)
+  }
+
+  implicit val handlerPutStr: Handler.Aux[PutStr, Unit, Unit, Unit, Future] = new Handler[PutStr, Future] {
+    type T = Unit
+    type ResI = Unit
+    type ResO = Unit
+
+    def handle[X](e: PutStr)(a: Unit)(k: Unit => Unit => Future[X]): Future[X] = k(print(e.s))()
+  }
+
+  implicit val handlerPutChar: Handler.Aux[PutChar, Unit, Unit, Unit, Future] = new Handler[PutChar, Future] {
+    type T = Unit
+    type ResI = Unit
+    type ResO = Unit
+
+    def handle[X](e: PutChar)(a: Unit)(k: Unit => Unit => Future[X]): Future[X] = k(print(e.c))()
+  }
+
+  implicit val handlerGetStr: Handler.Aux[GetStr.type, String, Unit, Unit, Future] = new Handler[GetStr.type, Future] {
+    type T = String
+    type ResI = Unit
+    type ResO = Unit
+
+    def handle[X](e: GetStr.type)(a: Unit)(k: String => Unit => Future[X]): Future[X] = k(scala.io.StdIn.readLine())()
+  }
+
+  implicit val handlerGetChar: Handler.Aux[GetChar.type, Char, Unit, Unit, Future] = new Handler[GetChar.type, Future] {
+    type T = Char
+    type ResI = Unit
+    type ResO = Unit
+
+    def handle[X](e: GetChar.type)(a: Unit)(k: Char => Unit => Future[X]): Future[X] = k(scala.io.StdIn.readChar())()
+  }
+}
 
 class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 
   implicit val defaultPatience =
     PatienceConfig(timeout =  TSpan(300, Seconds), interval = TSpan(5, Millis))
   
-  trait Label
+  sealed trait Label
   case object Foo extends Label
-  type Foo = Foo.type
   case object Bar extends Label
-  type Bar = Bar.type
+  // type Foo = Foo.type
+  // type Bar = Bar.type
 
   "Eff" should "simplest State" in {
 
@@ -69,6 +120,99 @@ class EffSpec extends FlatSpec with Matchers with ScalaFutures {
 
     r should equal (5)
   }
+
+import scala.concurrent.Future
+import cats.std.future._
+import scala.concurrent.ExecutionContext.Implicits.global
+
+it should "label" in {
+  import Implicits._
+
+  def eff[M[_]] = effective[M]{ implicit ctx =>
+      for {
+        k   <- Foo-:State.get[Int]
+        k2  <- Bar-:State.get[Int]
+        _   <- Bar-:State.put[Int](k + k2)
+        k3  <- Bar-:State.get[Int]
+      } yield (k3)
+  }
+
+  val r = eff[Future].run(Foo-:State.Res(3) :: Bar-:State.Res(2) :: HNil).futureValue
+  println("r:"+r)
+  r should equal (5)
+}
+
+it should "mix State & StdIO" in {
+  import Implicits._
+
+  def eff[M[_]] = effective[M]{ implicit ctx =>
+      for {
+        _   <- StdIO.putStrLn("Enter a name:")
+        // n   <- StdIO.getStr
+        n = "toto"
+        k   <- Foo-:State.get[Int]
+        k2  <- Bar-:State.get[Int]
+        _   <- Bar-:State.put[Int](n.length + k + k2)
+        k3  <- Bar-:State.get[Int]
+      } yield (n -> k3)
+  }
+
+  val (name, r) = eff[Future].run(Foo-:State.Res(3) :: Bar-:State.Res(2) :: StdIO.Res() :: HNil).futureValue
+  // r should equal (5 + name.length)
+
+}
+
+it should "More complex State+Label+ full effective" in {
+  import Implicits._
+
+  val eff = effective[Future, (State-:Int@:Foo.type) :: (State-:String@:Bar.type) :: (StdIO-:Unit) :: HNil]{ implicit ctx =>
+    for {
+      k0  <- Foo-:State.get[Int]
+      _   <- Bar-:State.put("works")
+      _   <- Foo-:State.update((i:Int) => i + 5)
+      k   <- Foo-:State.get[Int]
+      _   <- StdIO.putStrLn(s"tmp state:$k")
+      _   <- Bar-:State.update((s:String) => s + s"_$k")
+      s   <- Bar-:State.get[String]
+      _   <- Foo-:State.updateM[Int, String]((k:Int) => k0.toString + s"_$s")
+      r   <- Foo-:State.get[String]
+      _   <- StdIO.putStrLn(s"final state:$r")
+    } yield (r)
+  }
+
+
+  val r = eff.run(Foo-:State.Res(3) :: Bar-:State.Res("") :: StdIO.Res() :: HNil).futureValue
+
+  println("Res:"+r)
+  r should equal ("3_works_8")
+}
+
+it should "More complex State+Label+ simple effective" in {
+  import Implicits._
+
+  val eff = effective[Future]{ implicit ctx =>
+    for {
+      k0  <- Foo-:State.get[Int]
+      _   <- Bar-:State.put("works")
+      _   <- Foo-:State.update((i:Int) => i + 5)
+      k   <- Foo-:State.get[Int]
+      _   <- StdIO.putStrLn(s"tmp state:$k")
+      _   <- Bar-:State.update((s:String) => s + s"_$k")
+      s   <- Bar-:State.get[String]
+      _   <- Foo-:State.updateM[Int, String]((k:Int) => k0.toString + s"_$s")
+      r   <- Foo-:State.get[String]
+      _   <- StdIO.putStrLn(s"final state:$r")
+    } yield (r)
+  }
+
+
+  val r = eff.run(Foo-:State.Res(3) :: Bar-:State.Res("") :: StdIO.Res() :: HNil).futureValue
+
+  println("Res:"+r)
+  r should equal ("3_works_8")
+}
+
+
 /*  
   "Eff" should "flatMap isoList" in {
     val eff = State[Foo].put0[Future, Int](3).lift[(State@@Foo<>Int) :: (State@@Bar<>String) :: HNil].flatMap { _ => 
